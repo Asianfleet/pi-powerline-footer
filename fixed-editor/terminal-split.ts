@@ -133,8 +133,9 @@ const SCROLL_SETTLED_RENDER_MS = 80;
 const EXTENDED_KEYBOARD_RETRY_MS = 10;
 const EXTENDED_KEYBOARD_RETRY_ATTEMPTS = 50;
 const DOUBLE_CLICK_MS = 500;
-const SCROLLBAR_TRACK = "\x1b[2m│\x1b[22m";
-const SCROLLBAR_THUMB = "\x1b[34m█\x1b[39m";
+const SGR_RESET = "\x1b[0m";
+const SCROLLBAR_TRACK = `${SGR_RESET}\x1b[2m│${SGR_RESET}`;
+const SCROLLBAR_THUMB = `${SGR_RESET}\x1b[34m█${SGR_RESET}`;
 const DEFAULT_KEYBOARD_SCROLL_SHORTCUTS: KeyboardScrollShortcuts = {
   up: "super+up",
   down: "super+down",
@@ -169,7 +170,7 @@ export function moveCursor(row: number, col: number): string {
 }
 
 function clearLine(): string {
-  return "\x1b[2K";
+  return `${SGR_RESET}\x1b[2K`;
 }
 
 function hideCursor(): string {
@@ -1183,7 +1184,7 @@ export class TerminalSplitCompositor {
 
     const thumb = scrollbarThumb(scrollableRows, this.visibleRootStart, this.rootLines.length);
     const cell = row >= thumb.start && row < thumb.start + thumb.size ? SCROLLBAR_THUMB : SCROLLBAR_TRACK;
-    return `${" ".repeat(this.rootLeftGutterWidth(scrollableRows))}${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${" ".repeat(this.rootScrollbarSpacerWidth(scrollableRows))}${cell}`;
+    return `${" ".repeat(this.rootLeftGutterWidth(scrollableRows))}${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${SGR_RESET}${" ".repeat(this.rootScrollbarSpacerWidth(scrollableRows))}${cell}`;
   }
 
   /** 处理 root 滚动条的按下、拖动和释放鼠标包。 */

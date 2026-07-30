@@ -68,9 +68,17 @@ function firstThumbRow(lines: string[], col: number): number {
 /** 移除应用内滚动条左右 gutter，保留正文和其他 ANSI 样式断言。 */
 function withoutScrollbar(lines: string[]): string[] {
   return lines.map((line) => {
-    const stripped = line.replace(/\s*(?:\x1b\[2m│\x1b\[22m|\x1b\[34m█\x1b\[39m)(\s*)$/, "$1");
+    const stripped = line.replace(/(?:\s|\x1b\[0m)*(?:\x1b\[2m│(?:\x1b\[22m|\x1b\[0m)|\x1b\[34m█(?:\x1b\[39m|\x1b\[0m))(\s*)$/, "$1");
     return stripped.startsWith(" ") ? stripped.slice(1) : stripped;
   });
+}
+
+/** 断言清行控制序列前已重置 SGR，避免清屏继承背景色。 */
+function assertClearLineResetsSgr(write: string): void {
+  const chunks = write.split("\x1b[2K");
+  for (const prefix of chunks.slice(0, -1)) {
+    assert.ok(prefix.endsWith("\x1b[0m"));
+  }
 }
 
 /** 建立滚动条鼠标交互测试环境，隐藏重复的 compositor 接线。 */
@@ -312,7 +320,7 @@ test("terminal split applies outputPad as an outer fixed-editor inset", () => {
 
   compositor.requestRepaint();
   const repaint = terminal.writes.at(-1) ?? "";
-  assert.ok(repaint.includes("\x1b[12;1H\x1b[2K cluster:10 "));
+  assert.ok(repaint.includes("\x1b[12;1H\x1b[0m\x1b[2K cluster:10 "));
   assert.ok(repaint.includes("\x1b[12;4H\x1b[?25h"));
 
   compositor.dispose();
@@ -335,8 +343,8 @@ test("fixed cluster paint clears bottom rows and positions hardware cursor", () 
   );
 
   assert.match(paint, /^\x1b\[r/);
-  assert.ok(paint.includes("\x1b[9;1H\x1b[2Ktop"));
-  assert.ok(paint.includes("\x1b[10;1H\x1b[2Kedit"));
+  assert.ok(paint.includes("\x1b[9;1H\x1b[0m\x1b[2Ktop"));
+  assert.ok(paint.includes("\x1b[10;1H\x1b[0m\x1b[2Kedit"));
   assert.ok(paint.endsWith("\x1b[10;3H\x1b[?25h"));
 });
 
@@ -805,8 +813,8 @@ test("terminal split renders a scrollbar track and thumb for overflowing root co
 
   assert.ok(gutter.includes("│"));
   assert.ok(gutter.includes("█"));
-  assert.match(rendered.join("\n"), /\x1b\[2m│\x1b\[22m/);
-  assert.match(rendered.join("\n"), /\x1b\[34m█\x1b\[39m/);
+  assert.match(rendered.join("\n"), /\x1b\[0m\x1b\[2m│\x1b\[0m/);
+  assert.match(rendered.join("\n"), /\x1b\[0m\x1b\[34m█\x1b\[0m/);
 
   compositor.dispose();
 });
@@ -829,6 +837,30 @@ test("terminal split separates full-width root content from the scrollbar with a
   assert.ok(rendered.slice(0, 6).every((line) => scrollbarCell(line, 18) === " "));
   assert.ok(rendered.map((line) => scrollbarCell(line, 19)).some((cell) => cell === "│" || cell === "█"));
   assert.equal(stripAnsiForTest(withoutScrollbar(rendered)[0] ?? ""), "line-24 abcdefghi");
+
+  compositor.dispose();
+});
+
+test("terminal split resets root line styles before the scrollbar spacer and cell", () => {
+  const terminal = new FakeTerminal();
+  terminal.columns = 20;
+  terminal.setRows(8);
+  const tui = {
+    terminal,
+    render() {
+      return Array.from({ length: 18 }, () => "\x1b[48;5;240mabcdefghijklmnopq");
+    },
+  };
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["cluster-a", "cluster-b"], cursor: null }),
+  });
+
+  compositor.install();
+  const rendered = tui.render(20);
+
+  assert.ok(rendered[0]?.includes("abcdefghijklmnopq\x1b[0m \x1b[0m\x1b[2m│\x1b[0m"));
 
   compositor.dispose();
 });
@@ -1072,6 +1104,7 @@ test("terminal split repaints the full viewport while the scrollbar is visible",
   assert.equal(terminal.writes.length, 1);
   assert.doesNotMatch(terminal.writes[0] ?? "", /\x1b\[3T/);
   assert.equal((terminal.writes[0]?.match(/\x1b\[2K/g) ?? []).length, 12);
+  assertClearLineResetsSgr(terminal.writes[0] ?? "");
   assert.deepEqual(withoutScrollbar(tui.render(40)).slice(0, 3), ["line-17", "line-18", "line-19"]);
 
   terminal.writes = [];
@@ -1079,6 +1112,7 @@ test("terminal split repaints the full viewport while the scrollbar is visible",
   assert.equal(terminal.writes.length, 1);
   assert.doesNotMatch(terminal.writes[0] ?? "", /\x1b\[3S/);
   assert.equal((terminal.writes[0]?.match(/\x1b\[2K/g) ?? []).length, 12);
+  assertClearLineResetsSgr(terminal.writes[0] ?? "");
   assert.deepEqual(withoutScrollbar(tui.render(40)).slice(0, 3), ["line-20", "line-21", "line-22"]);
 
   compositor.dispose();
