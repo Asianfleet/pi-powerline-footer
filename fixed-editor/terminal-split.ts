@@ -33,6 +33,7 @@ interface TerminalSplitCompositorOptions {
   canRepaintClusterOnly?: () => boolean;
   getShowHardwareCursor?: () => boolean;
   mouseScroll?: boolean;
+  scrollbar?: boolean;
   keyboardScrollShortcuts?: KeyboardScrollShortcuts;
   scrollAwayNavigationCard?: ScrollAwayNavigationCardOptions;
   onCopySelection?: (text: string, source: "auto" | "explicit") => void;
@@ -132,6 +133,8 @@ const SCROLL_SETTLED_RENDER_MS = 80;
 const EXTENDED_KEYBOARD_RETRY_MS = 10;
 const EXTENDED_KEYBOARD_RETRY_ATTEMPTS = 50;
 const DOUBLE_CLICK_MS = 500;
+const SCROLLBAR_TRACK = "\x1b[2m│\x1b[22m";
+const SCROLLBAR_THUMB = "\x1b[34m█\x1b[39m";
 const DEFAULT_KEYBOARD_SCROLL_SHORTCUTS: KeyboardScrollShortcuts = {
   up: "super+up",
   down: "super+down",
@@ -219,6 +222,19 @@ function disableExtendedKeyboardMode(mode: ExtendedKeyboardMode): string {
 
 function resetExtendedKeyboardModes(): string {
   return "\x1b[<999u\x1b[>4;0m";
+}
+
+/** 依据顶部相对偏移计算滚动条 thumb 在 viewport 内的起点和高度。 */
+export function scrollbarThumb(height: number, yOffset: number, total: number): { start: number; size: number } {
+  const viewportHeight = Math.max(1, Math.floor(height));
+  const contentTotal = Math.max(viewportHeight, Math.floor(total));
+  const thumbSize = Math.max(1, Math.min(viewportHeight, Math.floor((viewportHeight * viewportHeight) / contentTotal)));
+  const maxOffset = Math.max(0, contentTotal - viewportHeight);
+  const clampedOffset = Math.max(0, Math.min(Math.floor(yOffset), maxOffset));
+  const maxStart = Math.max(0, viewportHeight - thumbSize);
+  const start = maxOffset === 0 ? 0 : Math.round((clampedOffset / maxOffset) * maxStart);
+
+  return { start, size: thumbSize };
 }
 
 export function emergencyTerminalModeReset(): string {
@@ -564,6 +580,7 @@ export class TerminalSplitCompositor {
   private readonly canRepaintClusterOnly: () => boolean;
   private readonly getShowHardwareCursor: () => boolean;
   private readonly mouseScroll: boolean;
+  private readonly scrollbar: boolean;
   private readonly keyboardScrollShortcuts: KeyboardScrollShortcuts;
   private readonly scrollAwayNavigationCard: ScrollAwayNavigationCardOptions | null;
   private readonly onCopySelection: ((text: string, source: "auto" | "explicit") => void) | null;
@@ -605,6 +622,8 @@ export class TerminalSplitCompositor {
   private selectionAnchor: SelectionPoint | null = null;
   private selectionFocus: SelectionPoint | null = null;
   private selectionDragging = false;
+  private scrollbarDragging = false;
+  private scrollbarGrabOffset = 0;
   private preserveSelectionFocusOnRelease = false;
   private lastLeftPress: { area: SelectionArea; line: number; at: number } | null = null;
   private pendingImageCleanup = false;
@@ -618,6 +637,7 @@ export class TerminalSplitCompositor {
     this.canRepaintClusterOnly = options.canRepaintClusterOnly ?? (() => false);
     this.getShowHardwareCursor = options.getShowHardwareCursor ?? (() => false);
     this.mouseScroll = options.mouseScroll !== false;
+    this.scrollbar = options.scrollbar !== false;
     this.keyboardScrollShortcuts = options.keyboardScrollShortcuts ?? DEFAULT_KEYBOARD_SCROLL_SHORTCUTS;
     this.scrollAwayNavigationCard = options.scrollAwayNavigationCard ?? null;
     this.onCopySelection = options.onCopySelection ?? null;
@@ -918,6 +938,11 @@ export class TerminalSplitCompositor {
     return Math.max(1, width - this.outerPadding(width) * 2);
   }
 
+  /** 返回 root 内容正文宽度，预留 1 列给应用内滚动条。 */
+  private rootBodyWidth(width: number): number {
+    return this.scrollbar ? Math.max(1, this.innerWidth(width) - 1) : this.innerWidth(width);
+  }
+
   private insetLine(line: string, width: number): string {
     const padding = this.outerPadding(width);
     if (padding === 0) return sanitizeLine(line, width);
@@ -941,7 +966,7 @@ export class TerminalSplitCompositor {
 
     const rawRows = this.getRawRows();
     const renderWidth = Math.max(1, Number.isFinite(width) ? width : this.terminal.columns || 80);
-    const contentWidth = this.innerWidth(renderWidth);
+    const contentWidth = this.rootBodyWidth(renderWidth);
     const cluster = this.getCluster(renderWidth, rawRows);
     const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
     const lines = this.originalRender(contentWidth);
@@ -1023,6 +1048,7 @@ export class TerminalSplitCompositor {
 
     const width = Math.max(1, this.terminal.columns || 80);
     this.refreshRootWindow(width);
+    if (this.handleRootScrollbarMousePacket(packet, width)) return;
     if (!options.skipScrollAwayCard && this.handleScrollAwayCardClick(packet, width)) return;
     const location = this.selectionLocationForPacket(packet);
 
@@ -1081,12 +1107,14 @@ export class TerminalSplitCompositor {
 
   private renderVisibleRootLines(start: number, width: number, scrollableRows: number): string[] {
     this.visibleRootWidth = width;
-    const contentWidth = this.innerWidth(width);
+    const contentWidth = this.rootBodyWidth(width);
     const renderedLines = this.visibleRootLines.map((line, index) => {
       return this.renderSelectionHighlight(line, start + index, "root");
     });
     const card = this.computeScrollAwayNavigationCard(contentWidth, scrollableRows);
-    if (!card) return renderedLines.map((line) => this.insetLine(line, width));
+    if (!card) {
+      return renderedLines.map((line, index) => this.insetLine(this.appendRootScrollbarCell(line, index, contentWidth, scrollableRows), width));
+    }
 
     const firstCardRow = scrollableRows - card.lines.length;
     for (let index = 0; index < card.lines.length; index++) {
@@ -1095,7 +1123,101 @@ export class TerminalSplitCompositor {
       renderedLines[row] = this.composeScrollAwayCardLine(renderedLines[row] ?? "", card.lines[index] ?? "", card.startCol, card.width, contentWidth);
     }
 
-    return renderedLines.map((line) => this.insetLine(line, width));
+    return renderedLines.map((line, index) => this.insetLine(this.appendRootScrollbarCell(line, index, contentWidth, scrollableRows), width));
+  }
+
+  /** 判断 root 内容是否超过当前 viewport，需要显示应用内滚动条。 */
+  private hasRootScrollbar(scrollableRows: number): boolean {
+    return this.scrollbar && this.rootLines.length > Math.max(1, scrollableRows);
+  }
+
+  /** 将 root 正文补齐后追加 track 或 thumb 单元格。 */
+  private appendRootScrollbarCell(line: string, row: number, bodyWidth: number, scrollableRows: number): string {
+    if (!this.hasRootScrollbar(scrollableRows)) return line;
+
+    const thumb = scrollbarThumb(scrollableRows, this.visibleRootStart, this.rootLines.length);
+    const cell = row >= thumb.start && row < thumb.start + thumb.size ? SCROLLBAR_THUMB : SCROLLBAR_TRACK;
+    return `${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${cell}`;
+  }
+
+  /** 处理 root 滚动条的按下、拖动和释放鼠标包。 */
+  private handleRootScrollbarMousePacket(packet: SgrMousePacket, width: number): boolean {
+    if (this.scrollbarDragging && isMouseRelease(packet)) {
+      this.scrollbarDragging = false;
+      this.scrollbarGrabOffset = 0;
+      this.lastLeftPress = null;
+      return true;
+    }
+
+    if (isLeftPress(packet) && this.isRootScrollbarTarget(packet, width)) {
+      this.scrollbarDragging = true;
+      this.scrollbarGrabOffset = this.rootScrollbarGrabOffset(packet);
+      this.clearSelection();
+      this.lastLeftPress = null;
+      this.preserveSelectionFocusOnRelease = false;
+      this.applyRootScrollbarMouseOffset(packet);
+      return true;
+    }
+
+    if (this.scrollbarDragging && isLeftDrag(packet)) {
+      this.applyRootScrollbarMouseOffset(packet);
+      return true;
+    }
+
+    return false;
+  }
+
+  /** 判断鼠标包是否落在 root viewport 的滚动条 gutter 列。 */
+  private isRootScrollbarTarget(packet: SgrMousePacket, width: number): boolean {
+    if (packet.row < 1 || packet.row > this.visibleScrollableRows || !this.hasRootScrollbar(this.visibleScrollableRows)) return false;
+
+    const col = this.contentCol(packet, width);
+    return col === this.rootScrollbarContentCol(width);
+  }
+
+  /** 返回 root 滚动条在 inner content 内的零基列号。 */
+  private rootScrollbarContentCol(width: number): number {
+    return Math.max(0, this.innerWidth(width) - 1);
+  }
+
+  /** 计算拖动时鼠标在 thumb 内抓住的行偏移。 */
+  private rootScrollbarGrabOffset(packet: SgrMousePacket): number {
+    const rows = Math.max(1, this.visibleScrollableRows);
+    const row = Math.max(0, Math.min(packet.row - 1, rows - 1));
+    const thumb = scrollbarThumb(rows, this.visibleRootStart, this.rootLines.length);
+    if (row >= thumb.start && row < thumb.start + thumb.size) return row - thumb.start;
+
+    return Math.floor(thumb.size / 2);
+  }
+
+  /** 将滚动条鼠标行转换为 root 的顶部相对偏移并应用到 viewport。 */
+  private applyRootScrollbarMouseOffset(packet: SgrMousePacket): void {
+    const rows = Math.max(1, this.visibleScrollableRows);
+    const maxTopOffset = Math.max(0, this.rootLines.length - rows);
+    const thumb = scrollbarThumb(rows, this.visibleRootStart, this.rootLines.length);
+    const maxThumbStart = Math.max(0, rows - thumb.size);
+    const row = Math.max(0, Math.min(packet.row - 1, rows - 1));
+    const thumbStart = Math.max(0, Math.min(row - this.scrollbarGrabOffset, maxThumbStart));
+    const topOffset = maxThumbStart === 0 ? 0 : Math.round((thumbStart / maxThumbStart) * maxTopOffset);
+
+    this.setRootScrollbarTopOffset(topOffset);
+  }
+
+  /** 将顶部相对偏移转换成本项目的底部相对 scrollOffset。 */
+  private setRootScrollbarTopOffset(topOffset: number): void {
+    const rows = Math.max(1, this.visibleScrollableRows);
+    const maxTopOffset = Math.max(0, this.rootLines.length - rows);
+    const clampedTopOffset = Math.max(0, Math.min(topOffset, maxTopOffset));
+    const nextScrollOffset = maxTopOffset - clampedTopOffset;
+
+    if (nextScrollOffset === this.scrollOffset) return;
+
+    this.cancelQueuedScroll();
+    this.scrollAwayCardHidden = false;
+    this.scrollOffset = nextScrollOffset;
+    this.pendingImageCleanup = true;
+    this.updateVisibleRootWindow(rows);
+    this.requestRender();
   }
 
   private composeScrollAwayCardLine(baseLine: string, overlayLine: string, startCol: number, overlayWidth: number, totalWidth: number): string {
@@ -1119,7 +1241,7 @@ export class TerminalSplitCompositor {
   }
 
   private isScrollAwayCardClick(packet: SgrMousePacket, width: number): boolean {
-    const card = this.computeScrollAwayNavigationCard(this.innerWidth(width), this.visibleScrollableRows);
+    const card = this.computeScrollAwayNavigationCard(this.rootBodyWidth(width), this.visibleScrollableRows);
     if (!card) return false;
 
     const col = this.contentCol(packet, width);
@@ -1468,7 +1590,7 @@ export class TerminalSplitCompositor {
     const previousScrollableRows = this.visibleScrollableRows;
     const previousRootStart = this.visibleRootStart;
     const previousVisibleRootLines = this.visibleRootLines;
-    const contentWidth = this.innerWidth(width);
+    const contentWidth = this.rootBodyWidth(width);
     const previousCard = previousCardVisible
       ? this.computeScrollAwayNavigationCard(contentWidth, previousScrollableRows, previousScrollOffset, true)
       : null;
@@ -1476,7 +1598,8 @@ export class TerminalSplitCompositor {
     const visibleLines = this.renderVisibleRootLines(start, width, scrollableRows);
     const scrollDelta = this.scrollOffset - previousScrollOffset;
     const shiftedRows = Math.abs(scrollDelta);
-    const canShiftRows = scrollDelta !== 0
+    const canShiftRows = !this.hasRootScrollbar(scrollableRows)
+      && scrollDelta !== 0
       && shiftedRows < scrollableRows
       && previousScrollableRows === scrollableRows
       && previousVisibleRootLines.length === scrollableRows

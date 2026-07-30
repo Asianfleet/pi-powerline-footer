@@ -32,6 +32,7 @@ test("parsePowerlineConfig supports object config with custom items", () => {
   assert.deepEqual(config.invalidLayoutSegments, []);
   assert.equal(config.mouseScroll, true);
   assert.equal(config.fixedEditor, true);
+  assert.equal(config.scrollbar, true);
   assert.equal(config.scrollAwayCard, true);
   assert.equal(config.separator, null);
   assert.equal(config.placement, "above");
@@ -172,6 +173,18 @@ test("parsePowerlineConfig supports disabling fixed editor", () => {
 
   assert.equal(config.preset, "compact");
   assert.equal(config.fixedEditor, false);
+});
+
+test("parsePowerlineConfig supports fixed-editor scrollbar settings", () => {
+  const defaultConfig = parsePowerlineConfig({}, ["default", "compact"]);
+  const disabled = parsePowerlineConfig(
+    { preset: "compact", scrollbar: false },
+    ["default", "compact"],
+  );
+
+  assert.equal(defaultConfig.scrollbar, true);
+  assert.equal(disabled.preset, "compact");
+  assert.equal(disabled.scrollbar, false);
 });
 
 test("parsePowerlineConfig supports hiding the scroll-away card while keeping fixed editor", () => {
@@ -323,7 +336,7 @@ test("nextPowerlineSettingWithPreset preserves object settings", () => {
 test("nextPowerlineSettingWithOptions preserves object settings", () => {
   const updated = nextPowerlineSettingWithOptions(
     { preset: "default", customItems: [{ id: "ci" }], mouseScroll: false },
-    { fixedEditor: false, scrollAwayCard: false, placement: "below" },
+    { fixedEditor: false, scrollAwayCard: false, scrollbar: false, placement: "below" },
     "compact",
   );
   if (typeof updated !== "object" || updated === null || Array.isArray(updated)) {
@@ -333,6 +346,7 @@ test("nextPowerlineSettingWithOptions preserves object settings", () => {
   assert.equal(updated.preset, "default");
   assert.equal(updated.fixedEditor, false);
   assert.equal(updated.scrollAwayCard, false);
+  assert.equal(updated.scrollbar, false);
   assert.equal(updated.mouseScroll, false);
   assert.equal(updated.placement, "below");
   assert.deepEqual(updated.customItems, [{ id: "ci" }]);

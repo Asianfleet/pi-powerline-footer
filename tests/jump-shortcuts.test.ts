@@ -9,8 +9,8 @@ import {
 } from "../shortcuts.ts";
 import { parseBashModeSettings, resolveShortcutConfig } from "../index.ts";
 
-const source = readFileSync(new URL("../index.ts", import.meta.url), "utf-8");
-const tokenStatsSource = readFileSync(new URL("../token-stats.ts", import.meta.url), "utf-8");
+const source = readFileSync(new URL("../index.ts", import.meta.url), "utf-8").replace(/\r\n/g, "\n");
+const tokenStatsSource = readFileSync(new URL("../token-stats.ts", import.meta.url), "utf-8").replace(/\r\n/g, "\n");
 
 const powerlineShortcutKeys = new Set([
   "stashHistory",
@@ -169,6 +169,11 @@ test("fixed editor passes top-level outputPad to the compositor", () => {
   assert.match(source, /outputPad: readOutputPadSetting\(ctx\.cwd\)/);
 });
 
+test("fixed editor passes the configured scrollbar option to the compositor", () => {
+  assert.match(source, /scrollbar: config\.scrollbar/);
+  assert.match(source, /Partial<Pick<PowerlineConfig, "mouseScroll" \| "fixedEditor" \| "scrollAwayCard" \| "scrollbar" \| "welcome" \| "stashSharpSShortcut" \| "placement">>/);
+});
+
 test("fixed editor captures Pi status messages with the editor cluster", () => {
   assert.match(source, /let fixedStatusContainer: any = null/);
   assert.match(source, /const statusContainerCandidate = tuiChildren\[editorContainerMatch\.index - 2\] \?\? null/);
@@ -180,7 +185,7 @@ test("fixed editor captures Pi status messages with the editor cluster", () => {
 });
 
 test("primary powerline placement applies in fixed and regular editor modes", () => {
-  assert.match(source, /Partial<Pick<PowerlineConfig, "mouseScroll" \| "fixedEditor" \| "scrollAwayCard" \| "welcome" \| "stashSharpSShortcut" \| "placement">>/);
+  assert.match(source, /Partial<Pick<PowerlineConfig, "mouseScroll" \| "fixedEditor" \| "scrollAwayCard" \| "scrollbar" \| "welcome" \| "stashSharpSShortcut" \| "placement">>/);
   assert.match(source, /primaryLines: renderPowerlinePrimaryLines\(width, theme\)/);
   assert.match(source, /placement: config\.placement/);
   assert.match(source, /\{ placement: config\.placement === "below" \? "belowEditor" : "aboveEditor" \}/);

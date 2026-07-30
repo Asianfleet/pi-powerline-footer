@@ -80,6 +80,7 @@ let config: PowerlineConfig = {
   segmentOptions: {},
   mouseScroll: true,
   fixedEditor: true,
+  scrollbar: true,
   scrollAwayCard: true,
   copyOnSelect: true,
   placement: "above",
@@ -646,7 +647,7 @@ function writePowerlinePresetSetting(preset: StatusLinePreset, cwd: string = pro
 
 function writePowerlineOptionSetting(
   cwd: string,
-  updates: Partial<Pick<PowerlineConfig, "mouseScroll" | "fixedEditor" | "scrollAwayCard" | "welcome" | "stashSharpSShortcut" | "placement">>,
+  updates: Partial<Pick<PowerlineConfig, "mouseScroll" | "fixedEditor" | "scrollAwayCard" | "scrollbar" | "welcome" | "stashSharpSShortcut" | "placement">>,
   currentPreset: StatusLinePreset,
 ): boolean {
   return writePowerlineSetting(cwd, (existingPowerlineSetting) => (
@@ -2451,6 +2452,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
           && !children.includes(currentEditor);
       },
       mouseScroll: config.mouseScroll,
+      scrollbar: config.scrollbar,
       keyboardScrollShortcuts: {
         up: resolvedShortcuts.scrollChatUp,
         down: resolvedShortcuts.scrollChatDown,

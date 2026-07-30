@@ -50,6 +50,86 @@ function navigationCardOptions(onClickBottom: () => boolean = () => false): Scro
   };
 }
 
+/** 移除 ANSI 样式码，让测试按可见列检查 root viewport。 */
+function stripAnsiForTest(line: string): string {
+  return line.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/** 返回指定渲染列的字符，用于检查应用内滚动条 gutter。 */
+function scrollbarCell(line: string, col: number): string {
+  return Array.from(stripAnsiForTest(line)).at(col) ?? "";
+}
+
+/** 返回第一段 thumb 的起始行，用于比较滚动条位置变化。 */
+function firstThumbRow(lines: string[], col: number): number {
+  return lines.findIndex((line) => scrollbarCell(line, col) === "█");
+}
+
+/** 移除行尾应用内滚动条，保留正文和其他 ANSI 样式断言。 */
+function withoutScrollbar(lines: string[]): string[] {
+  return lines.map((line) => line.replace(/\s*(?:\x1b\[2m│\x1b\[22m|\x1b\[34m█\x1b\[39m)(\s*)$/, "$1"));
+}
+
+/** 建立滚动条鼠标交互测试环境，隐藏重复的 compositor 接线。 */
+function createScrollbarMouseHarness(options: {
+  columns?: number;
+  rows?: number;
+  lineCount?: number;
+  outputPad?: number;
+  mouseScroll?: boolean;
+  scrollbar?: boolean;
+  onCopySelection?: (text: string, source: "auto" | "explicit") => void;
+} = {}): {
+  terminal: FakeTerminal;
+  compositor: TerminalSplitCompositor;
+  input: (data: string) => { consume?: boolean; data?: string } | undefined;
+  render: (width?: number) => string[];
+  rootRenderWidths: number[];
+  visible: () => string[];
+} {
+  const terminal = new FakeTerminal();
+  terminal.columns = options.columns ?? 20;
+  terminal.setRows(options.rows ?? 12);
+  let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
+  const rootRenderWidths: number[] = [];
+  const rootLines = Array.from({ length: options.lineCount ?? 30 }, (_, index) => `line-${index} abcdefghijklmnopqrstuvwxyz`);
+  const tui = {
+    terminal,
+    addInputListener(listener: (data: string) => { consume?: boolean; data?: string } | undefined) {
+      inputListener = listener;
+      return () => {
+        inputListener = null;
+      };
+    },
+    requestRender() {},
+    render(width?: number) {
+      rootRenderWidths.push(width ?? terminal.columns);
+      return rootLines;
+    },
+  };
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    outputPad: options.outputPad,
+    mouseScroll: options.mouseScroll,
+    scrollbar: options.scrollbar,
+    onCopySelection: options.onCopySelection,
+    renderCluster: () => ({ lines: ["cluster-a", "cluster-b"], cursor: null }),
+  });
+
+  compositor.install();
+  const visible = () => withoutScrollbar(tui.render(terminal.columns)).map((line) => stripAnsiForTest(line).trim());
+
+  return {
+    terminal,
+    compositor,
+    input: (data: string) => inputListener?.(data),
+    render: (width?: number) => tui.render(width),
+    rootRenderWidths,
+    visible,
+  };
+}
+
 test("fixed cluster keeps the editor visible before optional rows", () => {
   const rendered = renderFixedEditorCluster({
     width: 80,
@@ -223,8 +303,8 @@ test("terminal split applies outputPad as an outer fixed-editor inset", () => {
 
   compositor.install();
 
-  assert.deepEqual(tui.render(12), [" root:10 ", "  ", "  ", "  ", "  ", "  ", "  ", "  ", "  ", "  ", "  "]);
-  assert.deepEqual(rootRenderWidths, [10]);
+  assert.deepEqual(tui.render(12), [" root:9 ", "  ", "  ", "  ", "  ", "  ", "  ", "  ", "  ", "  ", "  "]);
+  assert.deepEqual(rootRenderWidths, [9]);
   assert.deepEqual(clusterRenderWidths.at(-1), 10);
 
   compositor.requestRepaint();
@@ -659,7 +739,7 @@ test("terminal split renders chat through an app-owned scroll viewport", () => {
   compositor.install();
 
   assert.equal(terminal.rows, 10);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-5", "line-6", "line-7", "line-8", "line-9",
     "line-10", "line-11", "line-12", "line-13", "line-14",
   ]);
@@ -671,27 +751,27 @@ test("terminal split renders chat through an app-owned scroll viewport", () => {
   assert.deepEqual(renderRequests, []);
   assert.deepEqual(inputListener?.("\x1b[<64;1;1M"), { consume: true });
   assert.deepEqual(renderRequests, [undefined]);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-2", "line-3", "line-4", "line-5", "line-6",
     "line-7", "line-8", "line-9", "line-10", "line-11",
   ]);
 
   rootLines = [...rootLines, "line-15"];
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-2", "line-3", "line-4", "line-5", "line-6",
     "line-7", "line-8", "line-9", "line-10", "line-11",
   ]);
 
   assert.deepEqual(inputListener?.("\x1b[<65;1;1M"), { consume: true });
   assert.deepEqual(renderRequests, [undefined, undefined]);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-5", "line-6", "line-7", "line-8", "line-9",
     "line-10", "line-11", "line-12", "line-13", "line-14",
   ]);
 
   assert.deepEqual(inputListener?.("\x1b[5~"), { consume: true });
   assert.deepEqual(renderRequests, [undefined, undefined, undefined]);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-0", "line-1", "line-2", "line-3", "line-4",
     "line-5", "line-6", "line-7", "line-8", "line-9",
   ]);
@@ -700,7 +780,240 @@ test("terminal split renders chat through an app-owned scroll viewport", () => {
   assert.equal(inputListener, null);
 });
 
-test("terminal split scrolls the viewport with terminal row shifts", () => {
+test("terminal split renders a scrollbar track and thumb for overflowing root content", () => {
+  const terminal = new FakeTerminal();
+  terminal.columns = 20;
+  terminal.setRows(8);
+  const tui = {
+    terminal,
+    render() {
+      return Array.from({ length: 18 }, (_, index) => `line-${index}`);
+    },
+  };
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["cluster-a", "cluster-b"], cursor: null }),
+  });
+
+  compositor.install();
+  const rendered = tui.render(20);
+  const gutter = rendered.map((line) => scrollbarCell(line, 19));
+
+  assert.ok(gutter.includes("│"));
+  assert.ok(gutter.includes("█"));
+  assert.match(rendered.join("\n"), /\x1b\[2m│\x1b\[22m/);
+  assert.match(rendered.join("\n"), /\x1b\[34m█\x1b\[39m/);
+
+  compositor.dispose();
+});
+
+test("terminal split restores full root width and ignores scrollbar gutter clicks when scrollbar is false", () => {
+  const { compositor, input, render, rootRenderWidths, visible } = createScrollbarMouseHarness({
+    columns: 20,
+    rows: 8,
+    scrollbar: false,
+  });
+  const rendered = render(20);
+  const gutter = rendered.map((line) => scrollbarCell(line, 19));
+
+  assert.deepEqual(rootRenderWidths, [20]);
+  assert.ok(!gutter.includes("│"));
+  assert.ok(!gutter.includes("█"));
+  assert.equal(visible()[0], "line-24 abcdefghijkl");
+  assert.deepEqual(input("\x1b[<0;20;1M"), { consume: true });
+  assert.equal(visible()[0], "line-24 abcdefghijkl");
+
+  compositor.dispose();
+});
+
+test("terminal split places the scrollbar thumb at the bottom when root scrollOffset is zero", () => {
+  const terminal = new FakeTerminal();
+  terminal.columns = 20;
+  terminal.setRows(8);
+  const tui = {
+    terminal,
+    render() {
+      return Array.from({ length: 18 }, (_, index) => `line-${index}`);
+    },
+  };
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["cluster-a", "cluster-b"], cursor: null }),
+  });
+
+  compositor.install();
+  const gutter = tui.render(20).map((line) => scrollbarCell(line, 19));
+
+  assert.equal(gutter.at(-1), "█");
+  assert.equal(firstThumbRow(tui.render(20), 19) > 0, true);
+
+  compositor.dispose();
+});
+
+test("terminal split moves the scrollbar thumb upward after PageUp", () => {
+  const terminal = new FakeTerminal();
+  terminal.columns = 20;
+  terminal.setRows(8);
+  let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
+  const tui = {
+    terminal,
+    addInputListener(listener: (data: string) => { consume?: boolean; data?: string } | undefined) {
+      inputListener = listener;
+      return () => {
+        inputListener = null;
+      };
+    },
+    requestRender() {},
+    render() {
+      return Array.from({ length: 18 }, (_, index) => `line-${index}`);
+    },
+  };
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["cluster-a", "cluster-b"], cursor: null }),
+  });
+
+  compositor.install();
+  const bottomThumbRow = firstThumbRow(tui.render(20), 19);
+
+  assert.deepEqual(inputListener?.("\x1b[5~"), { consume: true });
+  const pageUpThumbRow = firstThumbRow(tui.render(20), 19);
+
+  assert.ok(pageUpThumbRow >= 0);
+  assert.ok(pageUpThumbRow < bottomThumbRow);
+
+  compositor.dispose();
+});
+
+test("terminal split leaves the scrollbar gutter empty when root content does not overflow", () => {
+  const terminal = new FakeTerminal();
+  terminal.columns = 20;
+  terminal.setRows(8);
+  const tui = {
+    terminal,
+    render() {
+      return ["line-0", "line-1", "line-2"];
+    },
+  };
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["cluster-a", "cluster-b"], cursor: null }),
+  });
+
+  compositor.install();
+  const gutter = tui.render(20).map((line) => scrollbarCell(line, 19));
+
+  assert.ok(!gutter.includes("│"));
+  assert.ok(!gutter.includes("█"));
+
+  compositor.dispose();
+});
+
+test("terminal split renders the scrollbar inside the outputPad content area", () => {
+  const terminal = new FakeTerminal();
+  terminal.columns = 12;
+  terminal.setRows(8);
+  const tui = {
+    terminal,
+    render() {
+      return Array.from({ length: 18 }, (_, index) => `line-${index}`);
+    },
+  };
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    outputPad: 1,
+    renderCluster: () => ({ lines: ["cluster-a", "cluster-b"], cursor: null }),
+  });
+
+  compositor.install();
+  const rendered = tui.render(12);
+  const innerGutter = rendered.map((line) => scrollbarCell(line, 10));
+  const outerPadding = rendered.map((line) => scrollbarCell(line, 11));
+
+  assert.ok(innerGutter.includes("│"));
+  assert.ok(innerGutter.includes("█"));
+  assert.ok(outerPadding.every((cell) => cell === " "));
+
+  compositor.dispose();
+});
+
+test("terminal split jumps root viewport when left-clicking the scrollbar gutter", () => {
+  const { compositor, input, visible } = createScrollbarMouseHarness();
+
+  assert.equal(visible()[0], "line-20 abcdefghijk");
+  assert.deepEqual(input("\x1b[<0;20;1M"), { consume: true });
+  assert.equal(visible()[0], "line-0 abcdefghijkl");
+
+  compositor.dispose();
+});
+
+test("terminal split updates root viewport while dragging the scrollbar gutter", () => {
+  const { compositor, input, visible } = createScrollbarMouseHarness();
+
+  assert.deepEqual(input("\x1b[<0;20;1M"), { consume: true });
+  assert.equal(visible()[0], "line-0 abcdefghijkl");
+  assert.deepEqual(input("\x1b[<32;20;12M"), { consume: true });
+  assert.equal(visible()[0], "line-20 abcdefghijk");
+
+  compositor.dispose();
+});
+
+test("terminal split ends scrollbar dragging on mouse release", () => {
+  const { compositor, input, visible } = createScrollbarMouseHarness();
+
+  assert.deepEqual(input("\x1b[<0;20;1M"), { consume: true });
+  assert.equal(visible()[0], "line-0 abcdefghijkl");
+  assert.deepEqual(input("\x1b[<0;20;1m"), { consume: true });
+  assert.deepEqual(input("\x1b[<32;20;12M"), { consume: true });
+  assert.equal(visible()[0], "line-0 abcdefghijkl");
+
+  compositor.dispose();
+});
+
+test("terminal split scrollbar clicks do not create or copy a text selection", () => {
+  const copied: Array<{ text: string; source: string }> = [];
+  const { compositor, input } = createScrollbarMouseHarness({
+    onCopySelection: (text, source) => copied.push({ text, source }),
+  });
+
+  assert.deepEqual(input("\x1b[<0;20;1M"), { consume: true });
+  assert.deepEqual(input("\x1b[<32;20;3M"), { consume: true });
+  assert.deepEqual(input("\x1b[<0;20;3m"), { consume: true });
+  assert.deepEqual(copied, []);
+  assert.equal(input("\x03"), undefined);
+  assert.deepEqual(copied, []);
+
+  compositor.dispose();
+});
+
+test("terminal split does not consume scrollbar SGR mouse packets when mouseScroll is false", () => {
+  const { compositor, input, visible } = createScrollbarMouseHarness({ mouseScroll: false });
+
+  assert.equal(visible()[0], "line-20 abcdefghijk");
+  assert.equal(input("\x1b[<0;20;1M"), undefined);
+  assert.equal(visible()[0], "line-20 abcdefghijk");
+
+  compositor.dispose();
+});
+
+test("terminal split maps outputPad scrollbar clicks to the padded inner gutter column", () => {
+  const { compositor, input, visible } = createScrollbarMouseHarness({ columns: 12, outputPad: 1 });
+
+  assert.equal(visible()[0], "line-20 a");
+  assert.deepEqual(input("\x1b[<0;12;1M"), { consume: true });
+  assert.equal(visible()[0], "line-20 a");
+  assert.deepEqual(input("\x1b[<0;11;1M"), { consume: true });
+  assert.equal(visible()[0], "line-0 ab");
+
+  compositor.dispose();
+});
+
+test("terminal split repaints the full viewport while the scrollbar is visible", () => {
   const terminal = new FakeTerminal();
   terminal.columns = 40;
   let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
@@ -731,16 +1044,16 @@ test("terminal split scrolls the viewport with terminal row shifts", () => {
   assert.deepEqual(inputListener?.("\x1b[<64;1;1M"), { consume: true });
   assert.equal(rootRenderCalls, 1);
   assert.equal(terminal.writes.length, 1);
-  assert.match(terminal.writes[0] ?? "", /\x1b\[3T/);
-  assert.equal((terminal.writes[0]?.match(/\x1b\[2K/g) ?? []).length, 5);
-  assert.deepEqual(tui.render(40).slice(0, 3), ["line-17", "line-18", "line-19"]);
+  assert.doesNotMatch(terminal.writes[0] ?? "", /\x1b\[3T/);
+  assert.equal((terminal.writes[0]?.match(/\x1b\[2K/g) ?? []).length, 12);
+  assert.deepEqual(withoutScrollbar(tui.render(40)).slice(0, 3), ["line-17", "line-18", "line-19"]);
 
   terminal.writes = [];
   assert.deepEqual(inputListener?.("\x1b[<65;1;1M"), { consume: true });
   assert.equal(terminal.writes.length, 1);
-  assert.match(terminal.writes[0] ?? "", /\x1b\[3S/);
-  assert.equal((terminal.writes[0]?.match(/\x1b\[2K/g) ?? []).length, 5);
-  assert.deepEqual(tui.render(40).slice(0, 3), ["line-20", "line-21", "line-22"]);
+  assert.doesNotMatch(terminal.writes[0] ?? "", /\x1b\[3S/);
+  assert.equal((terminal.writes[0]?.match(/\x1b\[2K/g) ?? []).length, 12);
+  assert.deepEqual(withoutScrollbar(tui.render(40)).slice(0, 3), ["line-20", "line-21", "line-22"]);
 
   compositor.dispose();
 });
@@ -778,7 +1091,7 @@ test("terminal split refreshes root lines when Pi has a render pending", () => {
   compositor.dispose();
 });
 
-test("terminal split removes the old navigation card before shifting rows", () => {
+test("terminal split repaints the navigation card during full scrollbar viewport paints", () => {
   const terminal = new FakeTerminal();
   terminal.columns = 80;
   let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
@@ -809,9 +1122,9 @@ test("terminal split removes the old navigation card before shifting rows", () =
 
   const paint = terminal.writes[0] ?? "";
   const shiftIndex = paint.indexOf("\x1b[3T");
-  assert.notEqual(shiftIndex, -1);
-  assert.ok(paint.indexOf("line-", 0) < shiftIndex, "old card rows should be restored before the terminal shift");
-  assert.ok(paint.indexOf("Jump to bottom") > shiftIndex, "the card should be repainted after the terminal shift");
+  assert.equal(shiftIndex, -1);
+  assert.ok(paint.includes("line-"));
+  assert.ok(paint.includes("Jump to bottom"));
   assert.ok(tui.render(80).some((line) => line.includes("Jump to bottom")));
 
   compositor.dispose();
@@ -856,7 +1169,7 @@ test("terminal split defers the navigation card while wheel scrolling is active"
   t.mock.timers.tick(1);
   assert.equal(terminal.writes.length, 1);
   assert.doesNotMatch(terminal.writes[0] ?? "", /Jump to bottom/);
-  assert.equal((terminal.writes[0]?.match(/\x1b\[2K/g) ?? []).length, 5);
+  assert.equal((terminal.writes[0]?.match(/\x1b\[2K/g) ?? []).length, 12);
   assert.ok(!tui.render(80).some((line) => line.includes("Jump to bottom")));
 
   t.mock.timers.tick(80);
@@ -867,8 +1180,8 @@ test("terminal split defers the navigation card while wheel scrolling is active"
   inputListener?.("\x1b[<64;1;1M");
   t.mock.timers.tick(8);
   const paint = terminal.writes[0] ?? "";
-  assert.match(paint, /\x1b\[3T/);
-  assert.ok(paint.indexOf("line-") < paint.indexOf("\x1b[3T"));
+  assert.doesNotMatch(paint, /\x1b\[3T/);
+  assert.ok(paint.includes("line-"));
   assert.doesNotMatch(paint, /Jump to bottom/);
 
   compositor.dispose();
@@ -916,7 +1229,7 @@ test("terminal split coalesces throttled wheel bursts", (t) => {
 
   t.mock.timers.tick(16);
   assert.equal(terminal.writes.length, 1);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-2", "line-3", "line-4", "line-5", "line-6",
     "line-7", "line-8", "line-9", "line-10", "line-11",
   ]);
@@ -962,7 +1275,7 @@ test("terminal split cancels queued wheel scroll when jumping to bottom", (t) =>
   compositor.install();
   tui.render(40);
   assert.deepEqual(inputListener?.("\x1b[5~"), { consume: true });
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-0", "line-1", "line-2", "line-3", "line-4",
     "line-5", "line-6", "line-7", "line-8", "line-9",
   ]);
@@ -975,7 +1288,7 @@ test("terminal split cancels queued wheel scroll when jumping to bottom", (t) =>
   t.mock.timers.tick(16);
   assert.equal(terminal.writes.length, 0);
   assert.deepEqual(renderRequests, [undefined]);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-5", "line-6", "line-7", "line-8", "line-9",
     "line-10", "line-11", "line-12", "line-13", "line-14",
   ]);
@@ -1030,7 +1343,7 @@ test("terminal split ignores card clicks created only by a queued wheel flush", 
 
 test("terminal split does not route outputPad gutter clicks to the scroll-away card", () => {
   const terminal = new FakeTerminal();
-  terminal.columns = 10;
+  terminal.columns = 11;
   terminal.setRows(6);
   let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
   let bottomClicks = 0;
@@ -1060,9 +1373,9 @@ test("terminal split does not route outputPad gutter clicks to the scroll-away c
   });
 
   compositor.install();
-  tui.render(10);
+  tui.render(11);
   inputListener?.("\x1b[5~");
-  const rendered = tui.render(10);
+  const rendered = tui.render(11);
   const cardRow = rendered.findIndex((line) => line.includes("Bottom")) + 1;
   assert.ok(cardRow > 0, "compact card should render");
 
@@ -1215,8 +1528,8 @@ test("terminal split scroll-away navigation card width tiers collapse without wr
     { width: 50, includes: ["Bottom", "User", "Assistant", "prev ctrl+shift+u"], excludes: ["Jump to bottom"], clickText: "┌" },
     { width: 30, includes: ["User prev/next", "⌃⇧U/I", "Asst prev/next", "⌃⌥,/."], excludes: ["User messages"], clickText: "┌" },
     { width: 20, includes: ["Bottom ctrl+alt+g ↓"], excludes: ["User prev/next"], clickText: "Bottom ctrl+alt+g ↓" },
-    { width: 8, includes: ["Bottom ↓"], excludes: ["ctrl+alt+g"], clickText: "Bottom ↓" },
-    { width: 7, includes: [], excludes: ["Bottom"], clickText: null },
+    { width: 9, includes: ["Bottom ↓"], excludes: ["ctrl+alt+g"], clickText: "Bottom ↓" },
+    { width: 8, includes: [], excludes: ["Bottom"], clickText: null },
   ];
 
   for (const { width, includes, excludes, clickText } of cases) {
@@ -1418,7 +1731,7 @@ test("terminal split refreshes scroll bounds after fixed status rows appear", ()
   assert.deepEqual(renderRequests, [undefined]);
   assert.match(terminal.writes.at(-1) ?? "", /line-0/);
   assert.match(terminal.writes.at(-1) ?? "", /⠏ fixed status/);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-0", "line-1", "line-2", "line-3", "line-4",
     "line-5", "line-6", "line-7", "line-8", "line-9",
   ]);
@@ -1454,13 +1767,13 @@ test("terminal split clamps a stale offset when fixed rows disappear before repa
   compositor.install();
   tui.render(40);
   inputListener?.("\x1b[5~");
-  assert.deepEqual(tui.render(40).slice(0, 2), ["line-0", "line-1"]);
+  assert.deepEqual(withoutScrollbar(tui.render(40)).slice(0, 2), ["line-0", "line-1"]);
 
   statusVisible = false;
   terminal.writes = [];
   assert.deepEqual(inputListener?.("\x1b[<64;1;1M"), { consume: true });
   assert.equal(terminal.writes.length, 1);
-  assert.deepEqual(tui.render(40).slice(0, 2), ["line-0", "line-1"]);
+  assert.deepEqual(withoutScrollbar(tui.render(40)).slice(0, 2), ["line-0", "line-1"]);
   assert.match(terminal.writes[0] ?? "", /editor/);
 
   compositor.dispose();
@@ -1497,14 +1810,14 @@ test("terminal split handles modified SGR wheel packets", () => {
 
   assert.deepEqual(inputListener?.("\x1b[<68;1;1M"), { consume: true });
   assert.deepEqual(renderRequests, [undefined]);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-2", "line-3", "line-4", "line-5", "line-6",
     "line-7", "line-8", "line-9", "line-10", "line-11",
   ]);
 
   assert.deepEqual(inputListener?.("\x1b[<68;1;1M\x1b[<68;1;1M"), { consume: true });
   assert.deepEqual(renderRequests, [undefined, undefined]);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-0", "line-1", "line-2", "line-3", "line-4",
     "line-5", "line-6", "line-7", "line-8", "line-9",
   ]);
@@ -1623,14 +1936,14 @@ test("terminal split selects visible chat text and copies it on drag release", (
   });
 
   compositor.install();
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "alpha one", "bravo two", "charlie three", "delta four", "echo five",
     "foxtrot six", "golf seven", "hotel eight", "india nine", "juliet ten",
   ]);
 
   assert.deepEqual(inputListener?.("\x1b[<0;2;2M"), { consume: true });
   assert.deepEqual(inputListener?.("\x1b[<32;7;4M"), { consume: true });
-  assert.deepEqual(tui.render(40).slice(1, 4), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)).slice(1, 4), [
     "b\x1b[7mravo two\x1b[27m",
     "\x1b[7mcharlie three\x1b[27m",
     "\x1b[7mdelta \x1b[27mfour",
@@ -1980,7 +2293,7 @@ test("terminal split with autoCopyOnSelect disabled keeps selection, shows hint,
 
   // release does not auto-copy and the selection stays highlighted
   assert.deepEqual(copied, []);
-  assert.deepEqual(tui.render(40).slice(1, 4), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)).slice(1, 4), [
     "b\x1b[7mravo two\x1b[27m",
     "\x1b[7mcharlie three\x1b[27m",
     "\x1b[7mdelta \x1b[27mfour",
@@ -2121,20 +2434,20 @@ test("terminal split selection scrolls when dragged to viewport edges", () => {
   compositor.install();
   tui.render();
   inputListener?.("\x1b[5~");
-  assert.equal(tui.render()[0], "line-10");
+  assert.equal(withoutScrollbar(tui.render())[0], "line-10");
 
   assert.deepEqual(inputListener?.("\x1b[<0;1;9M"), { consume: true });
   assert.deepEqual(inputListener?.("\x1b[<32;5;12M"), { consume: true });
-  assert.equal(tui.render()[0], "line-11");
+  assert.equal(withoutScrollbar(tui.render())[0], "line-11");
   assert.ok(tui.render()[9]?.includes("\x1b[7mline\x1b[27m-20"));
   assert.deepEqual(inputListener?.("\x1b[<0;5;12m"), { consume: true });
   assert.deepEqual(copied, ["line-18\nline-19\nline"]);
 
   compositor.jumpToRootBottom();
-  assert.equal(tui.render()[0], "line-20");
+  assert.equal(withoutScrollbar(tui.render())[0], "line-20");
   assert.deepEqual(inputListener?.("\x1b[<0;1;2M"), { consume: true });
   assert.deepEqual(inputListener?.("\x1b[<32;5;1M"), { consume: true });
-  assert.equal(tui.render()[0]?.replace(/\x1b\[[0-9;]*m/g, ""), "line-19");
+  assert.equal(stripAnsiForTest(withoutScrollbar(tui.render())[0] ?? ""), "line-19");
   assert.ok(tui.render()[0]?.includes("line\x1b[7m-19\x1b[27m"));
   assert.deepEqual(inputListener?.("\x1b[<0;5;1m"), { consume: true });
   assert.deepEqual(copied, ["line-18\nline-19\nline", "-19\nline-20"]);
@@ -2418,21 +2731,21 @@ test("terminal split jumps to previous root target lines", () => {
   });
 
   compositor.install();
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-20", "line-21", "line-22", "line-23", "line-24",
     "line-25", "line-26", "line-27", "line-28", "line-29",
   ]);
 
   assert.equal(compositor.jumpToPreviousRootTarget([6, 14, 24]), true);
   assert.deepEqual(renderRequests, [undefined]);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-14", "line-15", "line-16", "line-17", "line-18",
     "line-19", "line-20", "line-21", "line-22", "line-23",
   ]);
 
   assert.equal(compositor.jumpToPreviousRootTarget([6, 14, 24]), true);
   assert.deepEqual(renderRequests, [undefined, undefined]);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-6", "line-7", "line-8", "line-9", "line-10",
     "line-11", "line-12", "line-13", "line-14", "line-15",
   ]);
@@ -2440,13 +2753,13 @@ test("terminal split jumps to previous root target lines", () => {
   assert.equal(compositor.jumpToPreviousRootTarget([6, 14, 24]), false);
 
   assert.equal(compositor.jumpToNextRootTarget([6, 14, 24]), true);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-14", "line-15", "line-16", "line-17", "line-18",
     "line-19", "line-20", "line-21", "line-22", "line-23",
   ]);
 
   assert.equal(compositor.jumpToNextRootTarget([6, 14, 24]), true);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-20", "line-21", "line-22", "line-23", "line-24",
     "line-25", "line-26", "line-27", "line-28", "line-29",
   ]);
@@ -2454,12 +2767,12 @@ test("terminal split jumps to previous root target lines", () => {
   assert.equal(compositor.jumpToNextRootTarget([6, 14, 24]), false);
 
   assert.equal(compositor.jumpToPreviousRootTarget([6, 14, 24]), true);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-14", "line-15", "line-16", "line-17", "line-18",
     "line-19", "line-20", "line-21", "line-22", "line-23",
   ]);
   assert.equal(compositor.jumpToRootBottom(), true);
-  assert.deepEqual(tui.render(40), [
+  assert.deepEqual(withoutScrollbar(tui.render(40)), [
     "line-20", "line-21", "line-22", "line-23", "line-24",
     "line-25", "line-26", "line-27", "line-28", "line-29",
   ]);
@@ -2491,18 +2804,18 @@ test("terminal split previous root target only moves to older targets", () => {
   });
 
   compositor.install();
-  assert.deepEqual(tui.render(), [
+  assert.deepEqual(withoutScrollbar(tui.render()), [
     "line-20", "line-21", "line-22", "line-23", "line-24",
     "line-25", "line-26", "line-27", "line-28", "line-29",
   ]);
   assert.deepEqual(inputListener?.("\x1b[5~"), { consume: true });
-  assert.deepEqual(tui.render(), [
+  assert.deepEqual(withoutScrollbar(tui.render()), [
     "line-10", "line-11", "line-12", "line-13", "line-14",
     "line-15", "line-16", "line-17", "line-18", "line-19",
   ]);
 
   assert.equal(compositor.jumpToPreviousRootTarget([6, 14, 24]), true);
-  assert.deepEqual(tui.render(), [
+  assert.deepEqual(withoutScrollbar(tui.render()), [
     "line-6", "line-7", "line-8", "line-9", "line-10",
     "line-11", "line-12", "line-13", "line-14", "line-15",
   ]);
@@ -2580,7 +2893,7 @@ test("terminal split cluster-only repaint falls back when root render width chan
   compositor.install();
   tui.doRender();
   assert.equal(appRenderCalls, 1);
-  assert.deepEqual(rootRenderWidths, [40]);
+  assert.deepEqual(rootRenderWidths, [39]);
 
   terminal.writes = [];
   tui.doRender();
@@ -2593,7 +2906,7 @@ test("terminal split cluster-only repaint falls back when root render width chan
   terminal.writes = [];
   tui.doRender();
   assert.equal(appRenderCalls, 2);
-  assert.deepEqual(rootRenderWidths, [40, 30]);
+  assert.deepEqual(rootRenderWidths, [39, 29]);
   assert.ok(terminal.writes.some((write) => write.includes("body")));
   assert.ok(terminal.writes.at(-1)?.includes("cluster:30"));
 

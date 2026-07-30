@@ -13,6 +13,7 @@ export interface PowerlineConfig {
   segmentOptions: StatusLineSegmentOptions;
   mouseScroll: boolean;
   fixedEditor: boolean;
+  scrollbar: boolean;
   scrollAwayCard: boolean;
   /** Whether mouse text selection copies to clipboard. Default true. */
   copyOnSelect: boolean;
@@ -302,6 +303,7 @@ export function parsePowerlineConfig(value: unknown, presets: readonly StatusLin
     segmentOptions: {},
     mouseScroll: true,
     fixedEditor: true,
+    scrollbar: true,
     scrollAwayCard: true,
     copyOnSelect: true,
     placement: "above",
@@ -331,6 +333,7 @@ export function parsePowerlineConfig(value: unknown, presets: readonly StatusLin
     segmentOptions: normalizeSegmentOptions(value),
     mouseScroll: value.mouseScroll !== false,
     fixedEditor: value.fixedEditor !== false,
+    scrollbar: value.scrollbar !== false,
     scrollAwayCard: value.scrollAwayCard !== false,
     copyOnSelect: value.copyOnSelect !== false,
     placement,
@@ -397,7 +400,7 @@ export function nextPowerlineSettingWithPreset(existingPowerlineSetting: unknown
 
 export function nextPowerlineSettingWithOptions(
   existingPowerlineSetting: unknown,
-  updates: Partial<Pick<PowerlineConfig, "mouseScroll" | "fixedEditor" | "scrollAwayCard" | "copyOnSelect" | "welcome" | "stashSharpSShortcut" | "placement">>,
+  updates: Partial<Pick<PowerlineConfig, "mouseScroll" | "fixedEditor" | "scrollAwayCard" | "scrollbar" | "copyOnSelect" | "welcome" | "stashSharpSShortcut" | "placement">>,
   currentPreset: StatusLinePreset,
 ): unknown {
   if (!isRecord(existingPowerlineSetting)) {
