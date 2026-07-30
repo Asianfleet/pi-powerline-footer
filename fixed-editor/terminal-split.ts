@@ -938,9 +938,21 @@ export class TerminalSplitCompositor {
     return Math.max(1, width - this.outerPadding(width) * 2);
   }
 
-  /** 返回 root 内容正文宽度，预留 1 列给应用内滚动条。 */
-  private rootBodyWidth(width: number): number {
+  /** 返回 root 内容初始正文宽度，保留右侧应用内滚动条列。 */
+  private initialRootBodyWidth(width: number): number {
     return this.scrollbar ? Math.max(1, this.innerWidth(width) - 1) : this.innerWidth(width);
+  }
+
+  /** 返回 root 内容可见正文宽度，滚动条可见时额外保留左侧对称 gutter。 */
+  private rootBodyWidth(width: number, scrollableRows: number): number {
+    const scrollbarWidth = this.scrollbar ? 1 : 0;
+    const leftGutterWidth = this.rootLeftGutterWidth(scrollableRows);
+    return Math.max(1, this.innerWidth(width) - scrollbarWidth - leftGutterWidth);
+  }
+
+  /** 返回 root viewport 的左侧视觉 gutter 宽度。 */
+  private rootLeftGutterWidth(scrollableRows: number): number {
+    return this.hasRootScrollbar(scrollableRows) ? 1 : 0;
   }
 
   private insetLine(line: string, width: number): string {
@@ -961,15 +973,35 @@ export class TerminalSplitCompositor {
     return Math.max(0, Math.min(packet.col - 1 - padding, this.innerWidth(width)));
   }
 
+  /** 将鼠标列转换为 root 正文内的零基列号，排除左侧视觉 gutter。 */
+  private rootContentCol(packet: SgrMousePacket, width: number): number | null {
+    const col = this.contentCol(packet, width);
+    if (col === null) return null;
+
+    const bodyCol = col - this.rootLeftGutterWidth(this.visibleScrollableRows);
+    return bodyCol >= 0 && bodyCol < this.rootBodyWidth(width, this.visibleScrollableRows) ? bodyCol : null;
+  }
+
+  /** 将鼠标列夹到 root 正文范围内，排除左侧视觉 gutter。 */
+  private clampedRootContentCol(packet: SgrMousePacket, width: number): number {
+    const padding = this.outerPadding(width) + this.rootLeftGutterWidth(this.visibleScrollableRows);
+    return Math.max(0, Math.min(packet.col - 1 - padding, this.rootBodyWidth(width, this.visibleScrollableRows)));
+  }
+
   private refreshRootWindow(width: number): number {
     if (!this.originalRender) return this.updateVisibleRootWindow();
 
     const rawRows = this.getRawRows();
     const renderWidth = Math.max(1, Number.isFinite(width) ? width : this.terminal.columns || 80);
-    const contentWidth = this.rootBodyWidth(renderWidth);
     const cluster = this.getCluster(renderWidth, rawRows);
     const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
-    const lines = this.originalRender(contentWidth);
+    const likelyVisibleScrollbar = this.scrollbar && this.lastRootLineCount > scrollableRows;
+    let contentWidth = likelyVisibleScrollbar ? Math.max(1, this.innerWidth(renderWidth) - 2) : this.initialRootBodyWidth(renderWidth);
+    let lines = this.originalRender(contentWidth);
+    if (!likelyVisibleScrollbar && this.scrollbar && lines.length > scrollableRows) {
+      contentWidth = Math.max(1, this.innerWidth(renderWidth) - 2);
+      lines = this.originalRender(contentWidth);
+    }
     this.rootLines = lines;
     if (this.scrollOffset > 0 && this.lastRootLineCount > 0 && lines.length > this.lastRootLineCount) {
       this.scrollOffset += lines.length - this.lastRootLineCount;
@@ -1107,7 +1139,7 @@ export class TerminalSplitCompositor {
 
   private renderVisibleRootLines(start: number, width: number, scrollableRows: number): string[] {
     this.visibleRootWidth = width;
-    const contentWidth = this.rootBodyWidth(width);
+    const contentWidth = this.rootBodyWidth(width, scrollableRows);
     const renderedLines = this.visibleRootLines.map((line, index) => {
       return this.renderSelectionHighlight(line, start + index, "root");
     });
@@ -1137,7 +1169,7 @@ export class TerminalSplitCompositor {
 
     const thumb = scrollbarThumb(scrollableRows, this.visibleRootStart, this.rootLines.length);
     const cell = row >= thumb.start && row < thumb.start + thumb.size ? SCROLLBAR_THUMB : SCROLLBAR_TRACK;
-    return `${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${cell}`;
+    return `${" ".repeat(this.rootLeftGutterWidth(scrollableRows))}${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${cell}`;
   }
 
   /** 处理 root 滚动条的按下、拖动和释放鼠标包。 */
@@ -1241,10 +1273,10 @@ export class TerminalSplitCompositor {
   }
 
   private isScrollAwayCardClick(packet: SgrMousePacket, width: number): boolean {
-    const card = this.computeScrollAwayNavigationCard(this.rootBodyWidth(width), this.visibleScrollableRows);
+    const card = this.computeScrollAwayNavigationCard(this.rootBodyWidth(width, this.visibleScrollableRows), this.visibleScrollableRows);
     if (!card) return false;
 
-    const col = this.contentCol(packet, width);
+    const col = this.rootContentCol(packet, width);
     if (col === null) return false;
 
     return card.bounds.some((bound) => {
@@ -1341,15 +1373,18 @@ export class TerminalSplitCompositor {
   private selectionLocationForPacket(packet: SgrMousePacket): SelectionLocation | null {
     if (packet.row < 1) return null;
 
-    const col = this.contentCol(packet, Math.max(1, this.terminal.columns || 80));
-    if (col === null) return null;
-
     if (packet.row <= this.visibleScrollableRows) {
+      const col = this.rootContentCol(packet, Math.max(1, this.terminal.columns || 80));
+      if (col === null) return null;
+
       return {
         area: "root",
         point: { line: this.visibleRootStart + packet.row - 1, col },
       };
     }
+
+    const col = this.contentCol(packet, Math.max(1, this.terminal.columns || 80));
+    if (col === null) return null;
 
     const clusterLine = packet.row - this.visibleScrollableRows - 1;
     if (clusterLine >= this.visibleClusterLines.length) return null;
@@ -1377,15 +1412,15 @@ export class TerminalSplitCompositor {
     const edgeLine = delta > 0 ? start : start + Math.max(0, this.visibleScrollableRows - 1);
     this.selectionFocus = {
       line: edgeLine,
-      col: this.clampedContentCol(packet, Math.max(1, this.terminal.columns || 80)),
+      col: this.clampedRootContentCol(packet, Math.max(1, this.terminal.columns || 80)),
     };
     this.requestRender();
     return true;
   }
 
   private clampedSelectionPointForPacket(packet: SgrMousePacket, area: SelectionArea | null): SelectionPoint {
-    const col = this.clampedContentCol(packet, Math.max(1, this.terminal.columns || 80));
     if (area === "cluster") {
+      const col = this.clampedContentCol(packet, Math.max(1, this.terminal.columns || 80));
       return {
         line: Math.max(0, Math.min(packet.row - this.visibleScrollableRows - 1, this.visibleClusterLines.length - 1)),
         col,
@@ -1395,7 +1430,7 @@ export class TerminalSplitCompositor {
     const row = Math.max(1, Math.min(packet.row, this.visibleScrollableRows));
     return {
       line: this.visibleRootStart + row - 1,
-      col,
+      col: this.clampedRootContentCol(packet, Math.max(1, this.terminal.columns || 80)),
     };
   }
 
@@ -1590,9 +1625,10 @@ export class TerminalSplitCompositor {
     const previousScrollableRows = this.visibleScrollableRows;
     const previousRootStart = this.visibleRootStart;
     const previousVisibleRootLines = this.visibleRootLines;
-    const contentWidth = this.rootBodyWidth(width);
+    const contentWidth = this.rootBodyWidth(width, scrollableRows);
+    const previousContentWidth = this.rootBodyWidth(width, previousScrollableRows);
     const previousCard = previousCardVisible
-      ? this.computeScrollAwayNavigationCard(contentWidth, previousScrollableRows, previousScrollOffset, true)
+      ? this.computeScrollAwayNavigationCard(previousContentWidth, previousScrollableRows, previousScrollOffset, true)
       : null;
     const start = this.updateVisibleRootWindow(scrollableRows);
     const visibleLines = this.renderVisibleRootLines(start, width, scrollableRows);
