@@ -943,16 +943,30 @@ export class TerminalSplitCompositor {
     return this.scrollbar ? Math.max(1, this.innerWidth(width) - 1) : this.innerWidth(width);
   }
 
-  /** 返回 root 内容可见正文宽度，滚动条可见时额外保留左侧对称 gutter。 */
+  /** 返回 root 内容可见正文宽度，滚动条可见时保留左右视觉 gutter。 */
   private rootBodyWidth(width: number, scrollableRows: number): number {
     const scrollbarWidth = this.scrollbar ? 1 : 0;
     const leftGutterWidth = this.rootLeftGutterWidth(scrollableRows);
-    return Math.max(1, this.innerWidth(width) - scrollbarWidth - leftGutterWidth);
+    const rightSpacerWidth = this.rootScrollbarSpacerWidth(scrollableRows);
+    return Math.max(1, this.innerWidth(width) - scrollbarWidth - leftGutterWidth - rightSpacerWidth);
   }
 
   /** 返回 root viewport 的左侧视觉 gutter 宽度。 */
   private rootLeftGutterWidth(scrollableRows: number): number {
     return this.hasRootScrollbar(scrollableRows) ? 1 : 0;
+  }
+
+  /** 返回 root 正文与滚动条之间的视觉间隔宽度。 */
+  private rootScrollbarSpacerWidth(scrollableRows: number): number {
+    return this.hasRootScrollbar(scrollableRows) ? 1 : 0;
+  }
+
+  /** 返回 root 滚动条已知可见时的正文宽度。 */
+  private rootBodyWidthWithVisibleScrollbar(width: number): number {
+    const scrollbarWidth = 1;
+    const leftGutterWidth = 1;
+    const rightSpacerWidth = 1;
+    return Math.max(1, this.innerWidth(width) - scrollbarWidth - leftGutterWidth - rightSpacerWidth);
   }
 
   private insetLine(line: string, width: number): string {
@@ -996,10 +1010,10 @@ export class TerminalSplitCompositor {
     const cluster = this.getCluster(renderWidth, rawRows);
     const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
     const likelyVisibleScrollbar = this.scrollbar && this.lastRootLineCount > scrollableRows;
-    let contentWidth = likelyVisibleScrollbar ? Math.max(1, this.innerWidth(renderWidth) - 2) : this.initialRootBodyWidth(renderWidth);
+    let contentWidth = likelyVisibleScrollbar ? this.rootBodyWidthWithVisibleScrollbar(renderWidth) : this.initialRootBodyWidth(renderWidth);
     let lines = this.originalRender(contentWidth);
     if (!likelyVisibleScrollbar && this.scrollbar && lines.length > scrollableRows) {
-      contentWidth = Math.max(1, this.innerWidth(renderWidth) - 2);
+      contentWidth = this.rootBodyWidthWithVisibleScrollbar(renderWidth);
       lines = this.originalRender(contentWidth);
     }
     this.rootLines = lines;
@@ -1163,13 +1177,13 @@ export class TerminalSplitCompositor {
     return this.scrollbar && this.rootLines.length > Math.max(1, scrollableRows);
   }
 
-  /** 将 root 正文补齐后追加 track 或 thumb 单元格。 */
+  /** 将 root 正文补齐后追加右侧 spacer 和 track 或 thumb 单元格。 */
   private appendRootScrollbarCell(line: string, row: number, bodyWidth: number, scrollableRows: number): string {
     if (!this.hasRootScrollbar(scrollableRows)) return line;
 
     const thumb = scrollbarThumb(scrollableRows, this.visibleRootStart, this.rootLines.length);
     const cell = row >= thumb.start && row < thumb.start + thumb.size ? SCROLLBAR_THUMB : SCROLLBAR_TRACK;
-    return `${" ".repeat(this.rootLeftGutterWidth(scrollableRows))}${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${cell}`;
+    return `${" ".repeat(this.rootLeftGutterWidth(scrollableRows))}${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${" ".repeat(this.rootScrollbarSpacerWidth(scrollableRows))}${cell}`;
   }
 
   /** 处理 root 滚动条的按下、拖动和释放鼠标包。 */
