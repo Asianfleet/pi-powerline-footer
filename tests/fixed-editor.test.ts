@@ -296,7 +296,7 @@ test("terminal split can render a hidden status container in the fixed cluster",
   assert.deepEqual(status.render(), ["", "⠙ Shaolin Switchblade Sync..."]);
 });
 
-test("terminal split applies outputPad as an outer fixed-editor inset", () => {
+test("terminal split applies outputPad as a left inset while expanding the right edge", () => {
   const terminal = new FakeTerminal();
   terminal.columns = 12;
   const rootRenderWidths: number[] = [];
@@ -322,13 +322,13 @@ test("terminal split applies outputPad as an outer fixed-editor inset", () => {
 
   compositor.install();
 
-  assert.deepEqual(tui.render(12), [" root:9 ", "  ", "  ", "  ", "  ", "  ", "  ", "  ", "  ", "  ", "  "]);
-  assert.deepEqual(rootRenderWidths, [9]);
-  assert.deepEqual(clusterRenderWidths.at(-1), 10);
+  assert.deepEqual(tui.render(12), [" root:10", " ", " ", " ", " ", " ", " ", " ", " ", " ", " "]);
+  assert.deepEqual(rootRenderWidths, [10]);
+  assert.deepEqual(clusterRenderWidths.at(-1), 11);
 
   compositor.requestRepaint();
   const repaint = terminal.writes.at(-1) ?? "";
-  assert.ok(repaint.includes("\x1b[12;1H\x1b[0m\x1b[2K cluster:10 "));
+  assert.ok(repaint.includes("\x1b[12;1H\x1b[0m\x1b[2K cluster:11"));
   assert.ok(repaint.includes("\x1b[12;4H\x1b[?25h"));
 
   compositor.dispose();
@@ -1053,14 +1053,14 @@ test("terminal split renders the scrollbar inside the outputPad content area", (
 
   compositor.install();
   const rendered = tui.render(12);
-  const scrollbar = rendered.map((line) => scrollbarCell(line, 9));
-  const innerGutter = rendered.map((line) => scrollbarCell(line, 10));
-  const outerPadding = rendered.map((line) => scrollbarCell(line, 11));
+  const spacer = rendered.map((line) => scrollbarCell(line, 9));
+  const scrollbar = rendered.map((line) => scrollbarCell(line, 10));
+  const rightGutter = rendered.map((line) => scrollbarCell(line, 11));
 
+  assert.ok(spacer.every((cell) => cell === " "));
   assert.ok(scrollbar.includes("│"));
   assert.ok(scrollbar.includes("█"));
-  assert.ok(innerGutter.every((cell) => cell === " "));
-  assert.ok(outerPadding.every((cell) => cell === " "));
+  assert.ok(rightGutter.every((cell) => cell === " "));
 
   compositor.dispose();
 });
@@ -1130,8 +1130,8 @@ test("terminal split maps outputPad scrollbar clicks to the padded inner gutter 
   assert.equal(visible()[0], "line-20");
   assert.deepEqual(input("\x1b[<0;12;1M"), { consume: true });
   assert.equal(visible()[0], "line-20");
-  assert.deepEqual(input("\x1b[<0;10;1M"), { consume: true });
-  assert.equal(visible()[0], "line-0");
+  assert.deepEqual(input("\x1b[<0;11;1M"), { consume: true });
+  assert.equal(visible()[0], "line-0 a");
 
   compositor.dispose();
 });
@@ -2112,12 +2112,12 @@ test("terminal split clamps outputPad gutter selection to content edges", () => 
   });
 
   compositor.install();
-  assert.equal(tui.render(10)[0], " abcdefgh ");
+  assert.equal(tui.render(10)[0], " abcdefgh");
 
   assert.deepEqual(inputListener?.("\x1b[<0;2;1M"), { consume: true });
   assert.deepEqual(inputListener?.("\x1b[<0;10;1m"), { consume: true });
 
-  assert.deepEqual(copied, ["abcdefg"]);
+  assert.deepEqual(copied, ["abcdefgh"]);
 
   compositor.dispose();
 });

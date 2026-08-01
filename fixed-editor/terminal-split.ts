@@ -938,12 +938,18 @@ export class TerminalSplitCompositor {
     }
   }
 
+  /** 返回固定编辑器左侧外边距；右侧可少 1 列来扩大内容右边界。 */
   private outerPadding(width: number): number {
     return Math.min(this.outputPad, Math.max(0, Math.floor((width - 1) / 2)));
   }
 
+  /** 返回固定编辑器右侧外边距，让内容区在保留左 inset 时向右多占 1 列。 */
+  private outerRightPadding(width: number): number {
+    return Math.max(0, this.outerPadding(width) - 1);
+  }
+
   private innerWidth(width: number): number {
-    return Math.max(1, width - this.outerPadding(width) * 2);
+    return Math.max(1, width - this.outerPadding(width) - this.outerRightPadding(width));
   }
 
   /** 返回 root 内容初始正文宽度，保留右侧应用内滚动条列。 */
@@ -978,10 +984,11 @@ export class TerminalSplitCompositor {
   }
 
   private insetLine(line: string, width: number): string {
-    const padding = this.outerPadding(width);
-    if (padding === 0) return sanitizeLine(line, width);
+    const leftPadding = this.outerPadding(width);
+    const rightPadding = this.outerRightPadding(width);
+    if (leftPadding === 0 && rightPadding === 0) return sanitizeLine(line, width);
 
-    return `${" ".repeat(padding)}${sanitizeLine(line, this.innerWidth(width))}${" ".repeat(padding)}`;
+    return `${" ".repeat(leftPadding)}${sanitizeLine(line, this.innerWidth(width))}${" ".repeat(rightPadding)}`;
   }
 
   private contentCol(packet: SgrMousePacket, width: number): number | null {
