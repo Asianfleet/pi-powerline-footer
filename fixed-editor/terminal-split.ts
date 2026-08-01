@@ -951,17 +951,11 @@ export class TerminalSplitCompositor {
     return this.scrollbar ? Math.max(1, this.innerWidth(width) - 1) : this.innerWidth(width);
   }
 
-  /** 返回 root 内容可见正文宽度，滚动条可见时保留左右视觉 gutter。 */
+  /** 返回 root 内容可见正文宽度，滚动条可见时保留右侧滚动条和正文间隔。 */
   private rootBodyWidth(width: number, scrollableRows: number): number {
     const scrollbarWidth = this.scrollbar ? 1 : 0;
-    const leftGutterWidth = this.rootLeftGutterWidth(scrollableRows);
     const rightSpacerWidth = this.rootScrollbarSpacerWidth(scrollableRows);
-    return Math.max(1, this.innerWidth(width) - scrollbarWidth - leftGutterWidth - rightSpacerWidth);
-  }
-
-  /** 返回 root viewport 的左侧视觉 gutter 宽度。 */
-  private rootLeftGutterWidth(scrollableRows: number): number {
-    return this.hasRootScrollbar(scrollableRows) ? 1 : 0;
+    return Math.max(1, this.innerWidth(width) - scrollbarWidth - rightSpacerWidth);
   }
 
   /** 返回 root 正文与滚动条之间的视觉间隔宽度。 */
@@ -972,9 +966,8 @@ export class TerminalSplitCompositor {
   /** 返回 root 滚动条已知可见时的正文宽度。 */
   private rootBodyWidthWithVisibleScrollbar(width: number): number {
     const scrollbarWidth = 1;
-    const leftGutterWidth = 1;
     const rightSpacerWidth = 1;
-    return Math.max(1, this.innerWidth(width) - scrollbarWidth - leftGutterWidth - rightSpacerWidth);
+    return Math.max(1, this.innerWidth(width) - scrollbarWidth - rightSpacerWidth);
   }
 
   private insetLine(line: string, width: number): string {
@@ -995,18 +988,17 @@ export class TerminalSplitCompositor {
     return Math.max(0, Math.min(packet.col - 1 - padding, this.innerWidth(width)));
   }
 
-  /** 将鼠标列转换为 root 正文内的零基列号，排除左侧视觉 gutter。 */
+  /** 将鼠标列转换为 root 正文内的零基列号，排除右侧滚动条区域。 */
   private rootContentCol(packet: SgrMousePacket, width: number): number | null {
     const col = this.contentCol(packet, width);
     if (col === null) return null;
 
-    const bodyCol = col - this.rootLeftGutterWidth(this.visibleScrollableRows);
-    return bodyCol >= 0 && bodyCol < this.rootBodyWidth(width, this.visibleScrollableRows) ? bodyCol : null;
+    return col < this.rootBodyWidth(width, this.visibleScrollableRows) ? col : null;
   }
 
-  /** 将鼠标列夹到 root 正文范围内，排除左侧视觉 gutter。 */
+  /** 将鼠标列夹到 root 正文范围内，排除右侧滚动条区域。 */
   private clampedRootContentCol(packet: SgrMousePacket, width: number): number {
-    const padding = this.outerPadding(width) + this.rootLeftGutterWidth(this.visibleScrollableRows);
+    const padding = this.outerPadding(width);
     return Math.max(0, Math.min(packet.col - 1 - padding, this.rootBodyWidth(width, this.visibleScrollableRows)));
   }
 
@@ -1191,7 +1183,7 @@ export class TerminalSplitCompositor {
 
     const thumb = scrollbarThumb(scrollableRows, this.visibleRootStart, this.rootLines.length);
     const cell = this.renderScrollbarCell(row >= thumb.start && row < thumb.start + thumb.size ? "thumb" : "track");
-    return `${" ".repeat(this.rootLeftGutterWidth(scrollableRows))}${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${SGR_RESET}${" ".repeat(this.rootScrollbarSpacerWidth(scrollableRows))}${cell}`;
+    return `${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${SGR_RESET}${" ".repeat(this.rootScrollbarSpacerWidth(scrollableRows))}${cell}`;
   }
 
   /** 处理 root 滚动条的按下、拖动和释放鼠标包。 */
