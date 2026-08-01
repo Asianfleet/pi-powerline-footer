@@ -68,7 +68,10 @@ function firstThumbRow(lines: string[], col: number): number {
 /** 移除行尾应用内滚动条，保留正文和其他 ANSI 样式断言。 */
 function withoutScrollbar(lines: string[]): string[] {
   return lines.map((line) => {
-    return line.replace(/(?:\s|\x1b\[0m)*(?:\x1b\[2m│(?:\x1b\[22m|\x1b\[0m)|\x1b\[34m█(?:\x1b\[39m|\x1b\[0m))(\s*)$/, "$1");
+    return line.replace(
+      /(?:\s|\x1b\[0m)*(?:\x1b\[2m│(?:\x1b\[22m|\x1b\[0m)|\x1b\[34m█(?:\x1b\[39m|\x1b\[0m))(?:\x1b\[0m)?(\s*)$/,
+      (_match, trailing: string) => " ".repeat(Math.max(0, trailing.length - 1)),
+    );
   });
 }
 
@@ -95,6 +98,7 @@ function createScrollbarMouseHarness(options: {
   input: (data: string) => { consume?: boolean; data?: string } | undefined;
   render: (width?: number) => string[];
   rootRenderWidths: number[];
+  clusterRenderWidths: number[];
   visible: () => string[];
 } {
   const terminal = new FakeTerminal();
@@ -102,6 +106,7 @@ function createScrollbarMouseHarness(options: {
   terminal.setRows(options.rows ?? 12);
   let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
   const rootRenderWidths: number[] = [];
+  const clusterRenderWidths: number[] = [];
   const rootLines = Array.from({ length: options.lineCount ?? 30 }, (_, index) => `line-${index} abcdefghijklmnopqrstuvwxyz`);
   const tui = {
     terminal,
@@ -124,7 +129,10 @@ function createScrollbarMouseHarness(options: {
     mouseScroll: options.mouseScroll,
     scrollbar: options.scrollbar,
     onCopySelection: options.onCopySelection,
-    renderCluster: () => ({ lines: ["cluster-a", "cluster-b"], cursor: null }),
+    renderCluster: (width) => {
+      clusterRenderWidths.push(width);
+      return { lines: ["cluster-a", "cluster-b"], cursor: null };
+    },
   });
 
   compositor.install();
@@ -136,6 +144,7 @@ function createScrollbarMouseHarness(options: {
     input: (data: string) => inputListener?.(data),
     render: (width?: number) => tui.render(width),
     rootRenderWidths,
+    clusterRenderWidths,
     visible,
   };
 }
@@ -808,7 +817,7 @@ test("terminal split renders a scrollbar track and thumb for overflowing root co
 
   compositor.install();
   const rendered = tui.render(20);
-  const gutter = rendered.map((line) => scrollbarCell(line, 19));
+  const gutter = rendered.map((line) => scrollbarCell(line, 18));
 
   assert.ok(gutter.includes("│"));
   assert.ok(gutter.includes("█"));
@@ -851,8 +860,8 @@ test("terminal split keeps root content flush left when the scrollbar is visible
   const rendered = render(20);
 
   assert.notEqual(scrollbarCell(rendered[0] ?? "", 0), " ");
-  assert.ok(rendered.map((line) => scrollbarCell(line, 19)).some((cell) => cell === "│" || cell === "█"));
-  assert.ok(withoutScrollbar(rendered)[0]?.startsWith("line-24 abcdefghij"));
+  assert.ok(rendered.map((line) => scrollbarCell(line, 18)).some((cell) => cell === "│" || cell === "█"));
+  assert.ok(withoutScrollbar(rendered)[0]?.startsWith("line-24 abcdefghi"));
 
   compositor.dispose();
 });
@@ -861,9 +870,22 @@ test("terminal split separates full-width root content from the scrollbar with a
   const { compositor, render } = createScrollbarMouseHarness({ columns: 20, rows: 8 });
   const rendered = render(20);
 
-  assert.ok(rendered.slice(0, 6).every((line) => scrollbarCell(line, 18) === " "));
-  assert.ok(rendered.map((line) => scrollbarCell(line, 19)).some((cell) => cell === "│" || cell === "█"));
-  assert.equal(stripAnsiForTest(withoutScrollbar(rendered)[0] ?? ""), "line-24 abcdefghij");
+  assert.ok(rendered.slice(0, 6).every((line) => scrollbarCell(line, 17) === " "));
+  assert.ok(rendered.map((line) => scrollbarCell(line, 18)).some((cell) => cell === "│" || cell === "█"));
+  assert.equal(scrollbarCell(rendered[0] ?? "", 19), " ");
+  assert.equal(stripAnsiForTest(withoutScrollbar(rendered)[0] ?? ""), "line-24 abcdefghi");
+
+  compositor.dispose();
+});
+
+test("terminal split aligns the scrollbar right edge with the fixed editor", () => {
+  const { compositor, render, clusterRenderWidths } = createScrollbarMouseHarness({ columns: 20, rows: 8 });
+  const rendered = render(20);
+
+  assert.equal(clusterRenderWidths.at(-1), 20);
+  assert.ok(rendered.map((line) => scrollbarCell(line, 18)).some((cell) => cell === "│" || cell === "█"));
+  assert.equal(scrollbarCell(rendered[0] ?? "", 19), " ");
+  assert.equal(stripAnsiForTest(withoutScrollbar(rendered)[0] ?? ""), "line-24 abcdefghi");
 
   compositor.dispose();
 });
@@ -887,7 +909,7 @@ test("terminal split resets root line styles before the scrollbar spacer and cel
   compositor.install();
   const rendered = tui.render(20);
 
-  assert.ok(rendered[0]?.includes("abcdefghijklmnopq \x1b[0m \x1b[0m\x1b[2m│\x1b[0m"));
+  assert.ok(rendered[0]?.includes("abcdefghijklmnopq\x1b[0m \x1b[0m\x1b[2m│\x1b[0m\x1b[0m "));
 
   compositor.dispose();
 });
@@ -929,10 +951,10 @@ test("terminal split places the scrollbar thumb at the bottom when root scrollOf
   });
 
   compositor.install();
-  const gutter = tui.render(20).map((line) => scrollbarCell(line, 19));
+  const gutter = tui.render(20).map((line) => scrollbarCell(line, 18));
 
   assert.equal(gutter.at(-1), "█");
-  assert.equal(firstThumbRow(tui.render(20), 19) > 0, true);
+  assert.equal(firstThumbRow(tui.render(20), 18) > 0, true);
 
   compositor.dispose();
 });
@@ -962,10 +984,10 @@ test("terminal split moves the scrollbar thumb upward after PageUp", () => {
   });
 
   compositor.install();
-  const bottomThumbRow = firstThumbRow(tui.render(20), 19);
+  const bottomThumbRow = firstThumbRow(tui.render(20), 18);
 
   assert.deepEqual(inputListener?.("\x1b[5~"), { consume: true });
-  const pageUpThumbRow = firstThumbRow(tui.render(20), 19);
+  const pageUpThumbRow = firstThumbRow(tui.render(20), 18);
 
   assert.ok(pageUpThumbRow >= 0);
   assert.ok(pageUpThumbRow < bottomThumbRow);
@@ -1031,11 +1053,13 @@ test("terminal split renders the scrollbar inside the outputPad content area", (
 
   compositor.install();
   const rendered = tui.render(12);
+  const scrollbar = rendered.map((line) => scrollbarCell(line, 9));
   const innerGutter = rendered.map((line) => scrollbarCell(line, 10));
   const outerPadding = rendered.map((line) => scrollbarCell(line, 11));
 
-  assert.ok(innerGutter.includes("│"));
-  assert.ok(innerGutter.includes("█"));
+  assert.ok(scrollbar.includes("│"));
+  assert.ok(scrollbar.includes("█"));
+  assert.ok(innerGutter.every((cell) => cell === " "));
   assert.ok(outerPadding.every((cell) => cell === " "));
 
   compositor.dispose();
@@ -1044,9 +1068,9 @@ test("terminal split renders the scrollbar inside the outputPad content area", (
 test("terminal split jumps root viewport when left-clicking the scrollbar gutter", () => {
   const { compositor, input, visible } = createScrollbarMouseHarness();
 
-  assert.equal(visible()[0], "line-20 abcdefghij");
-  assert.deepEqual(input("\x1b[<0;20;1M"), { consume: true });
-  assert.equal(visible()[0], "line-0 abcdefghijk");
+  assert.equal(visible()[0], "line-20 abcdefghi");
+  assert.deepEqual(input("\x1b[<0;19;1M"), { consume: true });
+  assert.equal(visible()[0], "line-0 abcdefghij");
 
   compositor.dispose();
 });
@@ -1054,10 +1078,10 @@ test("terminal split jumps root viewport when left-clicking the scrollbar gutter
 test("terminal split updates root viewport while dragging the scrollbar gutter", () => {
   const { compositor, input, visible } = createScrollbarMouseHarness();
 
-  assert.deepEqual(input("\x1b[<0;20;1M"), { consume: true });
-  assert.equal(visible()[0], "line-0 abcdefghijk");
-  assert.deepEqual(input("\x1b[<32;20;12M"), { consume: true });
-  assert.equal(visible()[0], "line-20 abcdefghij");
+  assert.deepEqual(input("\x1b[<0;19;1M"), { consume: true });
+  assert.equal(visible()[0], "line-0 abcdefghij");
+  assert.deepEqual(input("\x1b[<32;19;12M"), { consume: true });
+  assert.equal(visible()[0], "line-20 abcdefghi");
 
   compositor.dispose();
 });
@@ -1065,11 +1089,11 @@ test("terminal split updates root viewport while dragging the scrollbar gutter",
 test("terminal split ends scrollbar dragging on mouse release", () => {
   const { compositor, input, visible } = createScrollbarMouseHarness();
 
-  assert.deepEqual(input("\x1b[<0;20;1M"), { consume: true });
-  assert.equal(visible()[0], "line-0 abcdefghijk");
-  assert.deepEqual(input("\x1b[<0;20;1m"), { consume: true });
-  assert.deepEqual(input("\x1b[<32;20;12M"), { consume: true });
-  assert.equal(visible()[0], "line-0 abcdefghijk");
+  assert.deepEqual(input("\x1b[<0;19;1M"), { consume: true });
+  assert.equal(visible()[0], "line-0 abcdefghij");
+  assert.deepEqual(input("\x1b[<0;19;1m"), { consume: true });
+  assert.deepEqual(input("\x1b[<32;19;12M"), { consume: true });
+  assert.equal(visible()[0], "line-0 abcdefghij");
 
   compositor.dispose();
 });
@@ -1080,9 +1104,9 @@ test("terminal split scrollbar clicks do not create or copy a text selection", (
     onCopySelection: (text, source) => copied.push({ text, source }),
   });
 
-  assert.deepEqual(input("\x1b[<0;20;1M"), { consume: true });
-  assert.deepEqual(input("\x1b[<32;20;3M"), { consume: true });
-  assert.deepEqual(input("\x1b[<0;20;3m"), { consume: true });
+  assert.deepEqual(input("\x1b[<0;19;1M"), { consume: true });
+  assert.deepEqual(input("\x1b[<32;19;3M"), { consume: true });
+  assert.deepEqual(input("\x1b[<0;19;3m"), { consume: true });
   assert.deepEqual(copied, []);
   assert.equal(input("\x03"), undefined);
   assert.deepEqual(copied, []);
@@ -1093,9 +1117,9 @@ test("terminal split scrollbar clicks do not create or copy a text selection", (
 test("terminal split does not consume scrollbar SGR mouse packets when mouseScroll is false", () => {
   const { compositor, input, visible } = createScrollbarMouseHarness({ mouseScroll: false });
 
-  assert.equal(visible()[0], "line-20 abcdefghij");
+  assert.equal(visible()[0], "line-20 abcdefghi");
   assert.equal(input("\x1b[<0;20;1M"), undefined);
-  assert.equal(visible()[0], "line-20 abcdefghij");
+  assert.equal(visible()[0], "line-20 abcdefghi");
 
   compositor.dispose();
 });
@@ -1106,8 +1130,8 @@ test("terminal split maps outputPad scrollbar clicks to the padded inner gutter 
   assert.equal(visible()[0], "line-20");
   assert.deepEqual(input("\x1b[<0;12;1M"), { consume: true });
   assert.equal(visible()[0], "line-20");
-  assert.deepEqual(input("\x1b[<0;11;1M"), { consume: true });
-  assert.equal(visible()[0], "line-0 a");
+  assert.deepEqual(input("\x1b[<0;10;1M"), { consume: true });
+  assert.equal(visible()[0], "line-0");
 
   compositor.dispose();
 });

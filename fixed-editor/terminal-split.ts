@@ -951,11 +951,12 @@ export class TerminalSplitCompositor {
     return this.scrollbar ? Math.max(1, this.innerWidth(width) - 1) : this.innerWidth(width);
   }
 
-  /** 返回 root 内容可见正文宽度，滚动条可见时保留右侧滚动条和正文间隔。 */
+  /** 返回 root 内容可见正文宽度，滚动条可见时保留正文间隔、滚动条和右侧对齐 gutter。 */
   private rootBodyWidth(width: number, scrollableRows: number): number {
     const scrollbarWidth = this.scrollbar ? 1 : 0;
     const rightSpacerWidth = this.rootScrollbarSpacerWidth(scrollableRows);
-    return Math.max(1, this.innerWidth(width) - scrollbarWidth - rightSpacerWidth);
+    const rightGutterWidth = this.rootScrollbarRightGutterWidth(scrollableRows);
+    return Math.max(1, this.innerWidth(width) - scrollbarWidth - rightSpacerWidth - rightGutterWidth);
   }
 
   /** 返回 root 正文与滚动条之间的视觉间隔宽度。 */
@@ -963,11 +964,17 @@ export class TerminalSplitCompositor {
     return this.hasRootScrollbar(scrollableRows) ? 1 : 0;
   }
 
+  /** 返回滚动条右侧的视觉 gutter，用来让滚动条右边缘对齐固定编辑器。 */
+  private rootScrollbarRightGutterWidth(scrollableRows: number): number {
+    return this.hasRootScrollbar(scrollableRows) ? 1 : 0;
+  }
+
   /** 返回 root 滚动条已知可见时的正文宽度。 */
   private rootBodyWidthWithVisibleScrollbar(width: number): number {
     const scrollbarWidth = 1;
     const rightSpacerWidth = 1;
-    return Math.max(1, this.innerWidth(width) - scrollbarWidth - rightSpacerWidth);
+    const rightGutterWidth = 1;
+    return Math.max(1, this.innerWidth(width) - scrollbarWidth - rightSpacerWidth - rightGutterWidth);
   }
 
   private insetLine(line: string, width: number): string {
@@ -1177,13 +1184,13 @@ export class TerminalSplitCompositor {
     return this.scrollbar && this.rootLines.length > Math.max(1, scrollableRows);
   }
 
-  /** 将 root 正文补齐后追加右侧 spacer 和 track 或 thumb 单元格。 */
+  /** 将 root 正文补齐后追加右侧 spacer、track/thumb 和对齐 gutter。 */
   private appendRootScrollbarCell(line: string, row: number, bodyWidth: number, scrollableRows: number): string {
     if (!this.hasRootScrollbar(scrollableRows)) return line;
 
     const thumb = scrollbarThumb(scrollableRows, this.visibleRootStart, this.rootLines.length);
     const cell = this.renderScrollbarCell(row >= thumb.start && row < thumb.start + thumb.size ? "thumb" : "track");
-    return `${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${SGR_RESET}${" ".repeat(this.rootScrollbarSpacerWidth(scrollableRows))}${cell}`;
+    return `${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${SGR_RESET}${" ".repeat(this.rootScrollbarSpacerWidth(scrollableRows))}${cell}${SGR_RESET}${" ".repeat(this.rootScrollbarRightGutterWidth(scrollableRows))}`;
   }
 
   /** 处理 root 滚动条的按下、拖动和释放鼠标包。 */
@@ -1223,7 +1230,7 @@ export class TerminalSplitCompositor {
 
   /** 返回 root 滚动条在 inner content 内的零基列号。 */
   private rootScrollbarContentCol(width: number): number {
-    return Math.max(0, this.innerWidth(width) - 1);
+    return Math.max(0, this.innerWidth(width) - 1 - this.rootScrollbarRightGutterWidth(this.visibleScrollableRows));
   }
 
   /** 计算拖动时鼠标在 thumb 内抓住的行偏移。 */
