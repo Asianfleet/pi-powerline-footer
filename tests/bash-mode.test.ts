@@ -13,7 +13,7 @@ import {
   OneOffBashAutocompleteProvider,
 } from "../bash-mode/completion.ts";
 import { getIcons } from "../icons.ts";
-import { resolveColor } from "../theme.ts";
+import { getDefaultColors, resolveColor } from "../theme.ts";
 import { ManagedShellSession } from "../bash-mode/shell-session.ts";
 
 function getMethod(target: object, name: string): Function {
@@ -136,6 +136,13 @@ test("theme.json loads from the documented agent extension path", () => {
     }
     rmSync(agentDir, { recursive: true, force: true });
   }
+});
+
+test("theme defaults include fixed-editor scrollbar colors", () => {
+  const defaults = getDefaultColors();
+
+  assert.equal(defaults.scrollbarTrack, "dim");
+  assert.match(defaults.scrollbarThumb, /^#[0-9a-fA-F]{6}$/);
 });
 
 test("one-off bash command context strips ! and !! prefixes", () => {

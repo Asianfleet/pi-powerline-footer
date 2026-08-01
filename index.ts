@@ -40,7 +40,7 @@ import { isStaleExtensionContextError, shouldResetExtendedKeyboardModesOnShutdow
 import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
 import { DEFAULT_SCROLL_REPAINT_THROTTLE_MS, emergencyTerminalModeReset, TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
 import { inlineEditorQuitCursorRestore } from "./terminal-cursor.ts";
-import { getDefaultColors } from "./theme.ts";
+import { fg, getDefaultColors } from "./theme.ts";
 import { registerCdCommand } from "./cd-command.ts";
 import {
   isSupportedSuperShortcut,
@@ -2453,6 +2453,11 @@ export default function powerlineFooter(pi: ExtensionAPI) {
       },
       mouseScroll: config.mouseScroll,
       scrollbar: config.scrollbar,
+      renderScrollbarCell: (kind) => {
+        const theme = readRenderTheme();
+        const semantic = kind === "thumb" ? "scrollbarThumb" : "scrollbarTrack";
+        return `${ansi.reset}${fg(theme, semantic, kind === "thumb" ? "█" : "│", getPreset(config.preset).colors)}${ansi.reset}`;
+      },
       keyboardScrollShortcuts: {
         up: resolvedShortcuts.scrollChatUp,
         down: resolvedShortcuts.scrollChatDown,

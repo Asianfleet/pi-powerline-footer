@@ -21,7 +21,9 @@ export type SemanticColor =
   | "cost"
   | "tokens"
   | "separator"
-  | "border";
+  | "border"
+  | "scrollbarTrack"
+  | "scrollbarThumb";
 
 // Color scheme mapping semantic names to actual colors
 export type ColorScheme = Partial<Record<SemanticColor, ColorValue>>;

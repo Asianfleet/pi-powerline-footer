@@ -15,7 +15,9 @@
     "cost": "text",
     "tokens": "muted",
     "separator": "dim",
-    "border": "borderMuted"
+    "border": "borderMuted",
+    "scrollbarTrack": "dim",
+    "scrollbarThumb": "#178fb9"
   },
   "icons": {
     "auto": "↯",

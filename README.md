@@ -482,6 +482,8 @@ Colors are configurable via pi's theme system. Each preset defines its own color
 | `contextError` | `error` | Context usage >90% |
 | `cost` | `text` | Cost display |
 | `tokens` | `muted` | Token counts |
+| `scrollbarTrack` | `dim` | Fixed-editor scrollbar track |
+| `scrollbarThumb` | `#178fb9` | Fixed-editor scrollbar thumb |
 
 ### Custom Theme Override
 
@@ -497,7 +499,9 @@ Create `extensions/powerline-footer/theme.json` in the agent dir (`~/.pi/agent` 
     "thinking": "thinkingOff",
     "thinkingMinimal": "thinkingMinimal",
     "thinkingLow": "thinkingLow",
-    "thinkingMedium": "thinkingMedium"
+    "thinkingMedium": "thinkingMedium",
+    "scrollbarTrack": "dim",
+    "scrollbarThumb": "#178fb9"
   },
   "icons": {
     "auto": "↯",

@@ -819,6 +819,34 @@ test("terminal split renders a scrollbar track and thumb for overflowing root co
   compositor.dispose();
 });
 
+test("terminal split accepts custom scrollbar cell colors", () => {
+  const terminal = new FakeTerminal();
+  terminal.columns = 20;
+  terminal.setRows(8);
+  const tui = {
+    terminal,
+    render() {
+      return Array.from({ length: 18 }, (_, index) => `line-${index}`);
+    },
+  };
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["cluster-a", "cluster-b"], cursor: null }),
+    renderScrollbarCell: (kind: "track" | "thumb") => kind === "thumb"
+      ? "\x1b[38;2;95;215;255m█\x1b[0m"
+      : "\x1b[38;2;80;80;80m│\x1b[0m",
+  });
+
+  compositor.install();
+  const rendered = tui.render(20).join("\n");
+
+  assert.match(rendered, /\x1b\[38;2;80;80;80m│\x1b\[0m/);
+  assert.match(rendered, /\x1b\[38;2;95;215;255m█\x1b\[0m/);
+
+  compositor.dispose();
+});
+
 test("terminal split balances root viewport with a left gutter when the scrollbar is visible", () => {
   const { compositor, render } = createScrollbarMouseHarness({ columns: 20, rows: 8 });
   const rendered = render(20);

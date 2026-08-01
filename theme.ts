@@ -37,6 +37,8 @@ const DEFAULT_COLORS: Required<ColorScheme> = {
   tokens: "muted",
   separator: "dim",
   border: "borderMuted",
+  scrollbarTrack: "dim",
+  scrollbarThumb: "#178fb9",
 };
 
 // Rainbow colors for high thinking levels

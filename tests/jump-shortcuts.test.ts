@@ -174,6 +174,11 @@ test("fixed editor passes the configured scrollbar option to the compositor", ()
   assert.match(source, /Partial<Pick<PowerlineConfig, "mouseScroll" \| "fixedEditor" \| "scrollAwayCard" \| "scrollbar" \| "welcome" \| "stashSharpSShortcut" \| "placement">>/);
 });
 
+test("fixed editor passes theme-colored scrollbar cells to the compositor", () => {
+  assert.match(source, /renderScrollbarCell: \(kind\) =>/);
+  assert.match(source, /kind === "thumb" \? "scrollbarThumb" : "scrollbarTrack"/);
+});
+
 test("fixed editor captures Pi status messages with the editor cluster", () => {
   assert.match(source, /let fixedStatusContainer: any = null/);
   assert.match(source, /const statusContainerCandidate = tuiChildren\[editorContainerMatch\.index - 2\] \?\? null/);

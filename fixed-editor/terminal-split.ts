@@ -14,6 +14,9 @@ interface KeyboardScrollShortcuts {
   down: string | null;
 }
 
+type ScrollbarCellKind = "track" | "thumb";
+type RenderScrollbarCell = (kind: ScrollbarCellKind) => string;
+
 export type ScrollAwayNavigationShortcutId = "bottom" | "previousUser" | "nextUser" | "previousAssistant" | "nextAssistant";
 
 export interface ScrollAwayNavigationShortcut {
@@ -34,6 +37,7 @@ interface TerminalSplitCompositorOptions {
   getShowHardwareCursor?: () => boolean;
   mouseScroll?: boolean;
   scrollbar?: boolean;
+  renderScrollbarCell?: RenderScrollbarCell;
   keyboardScrollShortcuts?: KeyboardScrollShortcuts;
   scrollAwayNavigationCard?: ScrollAwayNavigationCardOptions;
   onCopySelection?: (text: string, source: "auto" | "explicit") => void;
@@ -136,6 +140,7 @@ const DOUBLE_CLICK_MS = 500;
 const SGR_RESET = "\x1b[0m";
 const SCROLLBAR_TRACK = `${SGR_RESET}\x1b[2m│${SGR_RESET}`;
 const SCROLLBAR_THUMB = `${SGR_RESET}\x1b[34m█${SGR_RESET}`;
+const DEFAULT_RENDER_SCROLLBAR_CELL: RenderScrollbarCell = (kind) => kind === "thumb" ? SCROLLBAR_THUMB : SCROLLBAR_TRACK;
 const DEFAULT_KEYBOARD_SCROLL_SHORTCUTS: KeyboardScrollShortcuts = {
   up: "super+up",
   down: "super+down",
@@ -582,6 +587,7 @@ export class TerminalSplitCompositor {
   private readonly getShowHardwareCursor: () => boolean;
   private readonly mouseScroll: boolean;
   private readonly scrollbar: boolean;
+  private readonly renderScrollbarCell: RenderScrollbarCell;
   private readonly keyboardScrollShortcuts: KeyboardScrollShortcuts;
   private readonly scrollAwayNavigationCard: ScrollAwayNavigationCardOptions | null;
   private readonly onCopySelection: ((text: string, source: "auto" | "explicit") => void) | null;
@@ -639,6 +645,7 @@ export class TerminalSplitCompositor {
     this.getShowHardwareCursor = options.getShowHardwareCursor ?? (() => false);
     this.mouseScroll = options.mouseScroll !== false;
     this.scrollbar = options.scrollbar !== false;
+    this.renderScrollbarCell = options.renderScrollbarCell ?? DEFAULT_RENDER_SCROLLBAR_CELL;
     this.keyboardScrollShortcuts = options.keyboardScrollShortcuts ?? DEFAULT_KEYBOARD_SCROLL_SHORTCUTS;
     this.scrollAwayNavigationCard = options.scrollAwayNavigationCard ?? null;
     this.onCopySelection = options.onCopySelection ?? null;
@@ -1183,7 +1190,7 @@ export class TerminalSplitCompositor {
     if (!this.hasRootScrollbar(scrollableRows)) return line;
 
     const thumb = scrollbarThumb(scrollableRows, this.visibleRootStart, this.rootLines.length);
-    const cell = row >= thumb.start && row < thumb.start + thumb.size ? SCROLLBAR_THUMB : SCROLLBAR_TRACK;
+    const cell = this.renderScrollbarCell(row >= thumb.start && row < thumb.start + thumb.size ? "thumb" : "track");
     return `${" ".repeat(this.rootLeftGutterWidth(scrollableRows))}${padVisibleEnd(sanitizeLine(line, bodyWidth), bodyWidth)}${SGR_RESET}${" ".repeat(this.rootScrollbarSpacerWidth(scrollableRows))}${cell}`;
   }
 
